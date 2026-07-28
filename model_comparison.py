@@ -102,6 +102,9 @@ def encode_images_model(image_paths, model, preprocess, batch_size=16, label="MO
         if not images:
             continue
         tensor = torch.stack(images).to(DEVICE)
+        # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
+        model_dtype = next(model.parameters()).dtype
+        tensor = tensor.to(dtype=model_dtype)
         with torch.no_grad():
             emb = model.encode_image(tensor)
         emb = emb.cpu().numpy().astype(np.float32)
@@ -115,6 +118,9 @@ def encode_texts_model(captions, model, tokenizer, batch_size=128, label="MODEL"
     for start in range(0, len(captions), batch_size):
         batch = captions[start:start + batch_size]
         tokens = tokenizer(batch).to(DEVICE)
+        # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
+        model_dtype = next(model.parameters()).dtype
+        tokens = tokens.to(dtype=model_dtype)
         with torch.no_grad():
             emb = model.encode_text(tokens)
         emb = emb.cpu().numpy().astype(np.float32)
@@ -127,6 +133,9 @@ def encode_texts_model(captions, model, tokenizer, batch_size=128, label="MODEL"
 
 def encode_single_image_model(image, model, preprocess):
     tensor = preprocess(image.convert("RGB")).unsqueeze(0).to(DEVICE)
+    # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
+    model_dtype = next(model.parameters()).dtype
+    tensor = tensor.to(dtype=model_dtype)
     with torch.no_grad():
         emb = model.encode_image(tensor)
     return _l2_normalise(emb.cpu().numpy().astype(np.float32))
@@ -134,6 +143,9 @@ def encode_single_image_model(image, model, preprocess):
 
 def encode_single_text_model(query, model, tokenizer):
     tokens = tokenizer([query]).to(DEVICE)
+    # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
+    model_dtype = next(model.parameters()).dtype
+    tokens = tokens.to(dtype=model_dtype)
     with torch.no_grad():
         emb = model.encode_text(tokens)
     return _l2_normalise(emb.cpu().numpy().astype(np.float32))
