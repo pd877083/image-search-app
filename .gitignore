@@ -1,0 +1,38 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Heavy local-only artifacts (NEVER commit — too big for GitHub) ────────────
+# The full Flickr8k dataset (1.1 GB), full ONNX exports (725 MB), and the full
+# fine-tuned checkpoint (578 MB) are offline-only. The cloud demo uses the
+# compact *_demo/ subsets + the lightweight projection heads instead.
+data/                        # full Flickr8k (1.1 GB)
+embeddings/*.npz             # full 8091-image embeddings (~91 MB)
+onnx/                        # ONNX exports, unused at runtime
+my_finetuned_clip.pt         # full checkpoint, unused at runtime
+
+# Lightweight fine-tuned heads — DO commit (small, loaded at runtime)
+!light_clip_heads.pt
+!light_blip_heads.pt
+!light_align_heads.pt
+
+# ── Benchmark / experiment artifacts ──────────────────────────────────────────
+embeddings/latency.json
+embeddings/latency_chart.png
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

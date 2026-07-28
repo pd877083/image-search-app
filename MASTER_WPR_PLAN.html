@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Master WPR Plan — Semantic Image Search Engine</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,300&display=swap');
+
+  :root{
+    --bg:#08080f; --panel:#11111d; --panel2:#15152a; --border:rgba(255,255,255,0.07);
+    --text:#e8e6f0; --muted:#8a87a0; --dim:#6b6884; --faint:#4a4862;
+    --purple:#8b6fff; --purple2:#7c5fff; --blue:#00b4ff; --red:#ff6464;
+    --green:#00c896; --orange:#ffa500; --yellow:#ffd166;
+    --done:#00c896; --prog:#ffd166; --todo:#ff6464;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;line-height:1.6;padding:0 0 5rem}
+  a{color:var(--purple);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 1.5rem}
+
+  /* HERO */
+  .hero{text-align:center;padding:4rem 0 3rem;background:radial-gradient(ellipse at top, rgba(124,95,255,0.12), transparent 60%)}
+  .eyebrow{font-size:.72rem;font-weight:500;letter-spacing:.25em;text-transform:uppercase;color:#9b8fff;margin-bottom:1rem}
+  h1{font-family:'Syne',sans-serif;font-size:clamp(2rem,5vw,3.4rem);font-weight:800;line-height:1.05;
+     background:linear-gradient(135deg,#fff 0%,#c4b8ff 50%,#8b6fff 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:.8rem}
+  .hero p{font-size:1.02rem;font-weight:300;color:var(--muted);max-width:640px;margin:0 auto 1.6rem}
+  .pills{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
+  .pill{background:rgba(139,111,255,0.12);border:1px solid rgba(139,111,255,0.3);color:#b3a0ff;font-size:.7rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;padding:.35rem .9rem;border-radius:99px}
+  .meta-row{display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;margin-top:1.8rem;font-size:.82rem;color:var(--dim)}
+  .meta-row b{color:var(--text);font-weight:600}
+
+  /* NAV */
+  nav{position:sticky;top:0;z-index:50;background:rgba(8,8,15,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);margin:1.5rem 0 0}
+  nav .wrap{display:flex;gap:.3rem;overflow-x:auto;padding:.7rem 1.5rem}
+  nav a{font-family:'Syne',sans-serif;font-size:.78rem;font-weight:600;letter-spacing:.04em;color:var(--dim);padding:.5rem .9rem;border-radius:8px;white-space:nowrap;transition:all .2s}
+  nav a:hover{background:rgba(139,111,255,0.12);color:#c4b8ff}
+
+  /* SECTIONS */
+  section{padding:3.5rem 0 1rem;scroll-margin-top:70px}
+  .sec-eyebrow{font-family:'Syne',sans-serif;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);margin-bottom:.7rem}
+  h2{font-family:'Syne',sans-serif;font-size:1.7rem;font-weight:700;margin-bottom:1.4rem}
+  h3{font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:700;margin:1.6rem 0 .8rem}
+  .lead{color:var(--muted);font-size:.95rem;margin-bottom:1.5rem;max-width:780px}
+
+  /* PROGRESS BANNER */
+  .banner{background:linear-gradient(135deg,rgba(124,95,255,0.14),rgba(0,180,255,0.08));border:1px solid rgba(139,111,255,0.25);border-radius:18px;padding:1.8rem 2rem;margin-bottom:2rem}
+  .banner h3{margin-top:0;color:#c4b8ff}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-top:1.2rem}
+  .stat{background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.2rem;text-align:center}
+  .stat .num{font-family:'Syne',sans-serif;font-size:1.9rem;font-weight:800;line-height:1}
+  .stat .lbl{font-size:.72rem;color:var(--dim);margin-top:.4rem;letter-spacing:.05em;text-transform:uppercase}
+  .n-done{color:var(--done)} .n-prog{color:var(--prog)} .n-todo{color:var(--todo)} .n-crit{color:var(--red)}
+
+  /* GRID CARDS */
+  .grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:1.4rem 1.5rem;transition:border-color .2s, transform .2s}
+  .card:hover{border-color:rgba(139,111,255,0.3)}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;gap:.5rem}
+  .card-title{font-family:'Syne',sans-serif;font-size:.98rem;font-weight:700}
+  .badge{font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:.28rem .6rem;border-radius:99px;white-space:nowrap}
+  .b-done{background:rgba(0,200,150,0.15);color:var(--done);border:1px solid rgba(0,200,150,0.3)}
+  .b-prog{background:rgba(255,209,102,0.15);color:var(--prog);border:1px solid rgba(255,209,102,0.3)}
+  .b-todo{background:rgba(255,100,100,0.15);color:var(--todo);border:1px solid rgba(255,100,100,0.3)}
+  .b-crit{background:rgba(255,0,0,0.18);color:#ff8a8a;border:1px solid rgba(255,0,0,0.4)}
+  .b-info{background:rgba(0,180,255,0.15);color:var(--blue);border:1px solid rgba(0,180,255,0.3)}
+  .card-body{font-size:.86rem;color:var(--muted);line-height:1.6}
+  .card-body code{background:rgba(139,111,255,0.12);color:#c4b8ff;padding:.1rem .35rem;border-radius:4px;font-size:.8rem}
+  .week-tag{display:inline-block;font-family:'Syne',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:.12em;color:var(--faint);margin-bottom:.4rem}
+
+  /* WEEK TIMELINE */
+  .timeline{position:relative;padding-left:1.6rem;border-left:2px solid rgba(139,111,255,0.2)}
+  .wk{position:relative;margin-bottom:1.6rem}
+  .wk::before{content:'';position:absolute;left:-1.97rem;top:.35rem;width:.9rem;height:.9rem;border-radius:50%;background:var(--bg);border:2px solid var(--purple)}
+  .wk-title{font-family:'Syne',sans-serif;font-weight:700;font-size:.98rem;margin-bottom:.25rem}
+  .wk-dates{font-size:.72rem;color:var(--dim);margin-bottom:.4rem}
+  .wk-sum{font-size:.86rem;color:var(--muted)}
+
+  /* TABLE */
+  table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:.5rem}
+  th,td{text-align:left;padding:.7rem .8rem;border-bottom:1px solid var(--border)}
+  th{font-family:'Syne',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  td code{background:rgba(139,111,255,0.12);color:#c4b8ff;padding:.12rem .4rem;border-radius:4px;font-size:.78rem}
+  tr:hover td{background:rgba(139,111,255,0.04)}
+
+  /* CHECKLIST */
+  .checklist{display:flex;flex-direction:column;gap:.6rem}
+  .chk{display:flex;align-items:flex-start;gap:.8rem;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:.9rem 1.1rem}
+  .chk-num{flex-shrink:0;width:1.8rem;height:1.8rem;border-radius:50%;background:rgba(139,111,255,0.15);color:#c4b8ff;font-family:'Syne',sans-serif;font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center}
+  .chk-body{font-size:.88rem;color:var(--muted)}
+  .chk-body b{color:var(--text);font-weight:600}
+  .chk-body code{background:rgba(139,111,255,0.12);color:#c4b8ff;padding:.1rem .35rem;border-radius:4px;font-size:.8rem}
+  .chk-tag{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-left:.4rem}
+  .chk.crit{border-color:rgba(255,100,100,0.3)}
+  .chk.crit .chk-num{background:rgba(255,100,100,0.18);color:#ff8a8a}
+
+  /* INFO BOX */
+  .infobox{background:rgba(139,111,255,0.07);border:1px solid rgba(139,111,255,0.18);border-radius:14px;padding:1.2rem 1.4rem;font-size:.88rem;color:#a09ac8;margin:1rem 0}
+  .infobox.warn{background:rgba(255,209,102,0.08);border-color:rgba(255,209,102,0.25);color:#e6d49a}
+  .infobox.danger{background:rgba(255,100,100,0.08);border-color:rgba(255,100,100,0.25);color:#f0b0b0}
+
+  ul.clean{list-style:none;padding:0;margin:.6rem 0}
+  ul.clean li{padding:.25rem 0 .25rem 1.3rem;position:relative;font-size:.88rem;color:var(--muted)}
+  ul.clean li::before{content:'▸';position:absolute;left:0;color:var(--purple)}
+  ul.clean li code{background:rgba(139,111,255,0.12);color:#c4b8ff;padding:.1rem .35rem;border-radius:4px;font-size:.8rem}
+
+  .tag-row{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem}
+  .mini{font-size:.68rem;padding:.2rem .55rem;border-radius:99px;border:1px solid var(--border);color:var(--dim)}
+
+  hr.sep{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+
+  footer{text-align:center;padding:3rem 1.5rem 0;font-size:.78rem;color:var(--faint)}
+  footer b{color:var(--dim)}
+
+  @media(max-width:640px){
+    h2{font-size:1.4rem}
+    .grid{grid-template-columns:1fr}
+    nav .wrap{padding:.6rem 1rem}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">NTCC · Master Consolidated WPR Plan</div>
+    <h1>Semantic Image Search Engine</h1>
+    <p>Cross-Modal Retrieval & Vision-Language Alignment using CLIP, BLIP &amp; ALIGN.
+       A single consolidated execution plan built from all 9 weekly WPRs + the Master WPR —
+       cross-checked against the actual codebase to surface what is genuinely pending.</p>
+    <div class="pills">
+      <span class="pill">CLIP ViT-B/32</span>
+      <span class="pill">BLIP ViT-L/14</span>
+      <span class="pill">ALIGN ViT-H/14</span>
+      <span class="pill">Streamlit</span>
+      <span class="pill">ONNX</span>
+    </div>
+    <div class="meta-row">
+      <span>Group: <b>Dhruv · Anish · Rudra</b></span>
+      <span>Supervisor: <b>Dr. Rakesh Chandra Joshi</b></span>
+      <span>Semester <b>4 · CSE</b></span>
+      <span>Deadline: <b>Tomorrow</b></span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ NAV ============ -->
+<nav>
+  <div class="wrap">
+    <a href="#overview">Overview</a>
+    <a href="#gaps">Reality Check</a>
+    <a href="#critical">Critical Bugs</a>
+    <a href="#pending">Pending Work</a>
+    <a href="#checklist">Execution Checklist</a>
+    <a href="#timeline">WPR Timeline</a>
+    <a href="#benchmarks">Benchmarks</a>
+  </div>
+</nav>
+
+<!-- ============ OVERVIEW ============ -->
+<section id="overview">
+  <div class="wrap">
+    <div class="sec-eyebrow">Status at a glance</div>
+    <h2>Where the project really stands</h2>
+
+    <div class="banner">
+      <h3>🎯 Bottom line</h3>
+      <p style="color:#c4b8ff;font-size:.92rem">
+        The <b>core Streamlit app works</b> (Text→Image, Image→Caption, CLIP vs TF-IDF vs BM25, CLIP vs BLIP vs ALIGN, Precision@K charts).
+        All embeddings + fine-tuned lightweight weights are built. <b>But</b> several headline features written in the WPRs
+        are <b>missing or broken in code</b>: ONNX export, INT8 quantization, Image-to-Image reverse search, cloud deployment, and the
+        evaluation numbers in <code>precision_scores.json</code> are far below what the Master WPR reports. These must be fixed before submission.
+      </p>
+      <div class="stats">
+        <div class="stat"><div class="num n-done">7</div><div class="lbl">Features Done</div></div>
+        <div class="stat"><div class="num n-prog">4</div><div class="lbl">Partial / Half-Done</div></div>
+        <div class="stat"><div class="num n-todo">9</div><div class="lbl">Pending Tasks</div></div>
+        <div class="stat"><div class="num n-crit">3</div><div class="lbl">Critical Bugs</div></div>
+      </div>
+    </div>
+
+    <h3>✅ Already implemented &amp; working in code</h3>
+    <div class="grid">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Streamlit 4-tab UI</span><span class="badge b-done">Done · W1</span></div>
+        <div class="card-body">Text→Images, Image→Captions, CLIP vs TF-IDF vs BM25, CLIP vs BLIP vs ALIGN. Dark theme, Google Fonts, score bars. <code>app.py</code> is live on <code>localhost:8501</code>.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Search history</span><span class="badge b-done">Done · W2</span></div>
+        <div class="card-body">Last 10 unique queries, click-to-rerun, clear-history. Uses <code>st.session_state</code> with hashed unique widget keys.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">CLIP fine-tuning (CPU)</span><span class="badge b-done">Done · W3</span></div>
+        <div class="card-body">Custom training loop on 1,000 CC3M pairs, contrastive loss, AdamW lr=5e-6. Saved <code>my_finetuned_clip.pt</code> (605 MB).</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Projection-head tuning (Kaggle)</span><span class="badge b-done">Done · W4</span></div>
+        <div class="card-body">Frozen 99% backbones, tuned only <code>visual.proj</code> + <code>text_projection</code>. Extracted lightweight heads: <code>light_clip_heads.pt</code> (2.6MB), <code>light_blip_heads.pt</code> (5.5MB), <code>light_align_heads.pt</code> (9.4MB).</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Precision@K charts</span><span class="badge b-done">Done · W5</span></div>
+        <div class="card-body">Plotly grouped bar charts + average cards in UI. Reads <code>embeddings/precision_scores.json</code>. <b>But numbers are wrong</b> — see Reality Check.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Three model loading</span><span class="badge b-done">Done · W4</span></div>
+        <div class="card-body">CLIP via <code>clip</code>, BLIP/ALIGN simulated via OpenCLIP ViT-L-14 / ViT-H-14. All inject lightweight heads with <code>strict=False</code> + <code>os.path.exists</code> guards.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Pre-computed embeddings</span><span class="badge b-done">Done</span></div>
+        <div class="card-body">All 7 <code>.npz</code> files present (image/text + blip/align + metadata). Flickr8k (8,091 images) dataset is present.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ REALITY CHECK ============ -->
+<section id="gaps">
+  <div class="wrap">
+    <div class="sec-eyebrow">WPR claims vs actual code</div>
+    <h2>⚠️ Reality Check — the gaps</h2>
+    <p class="lead">Each row below compares what a WPR <i>claims</i> was completed against what the codebase actually contains. This is where the project's story and reality diverge.</p>
+
+    <table>
+      <thead>
+        <tr><th style="width:34%">WPR claim (what it says was done)</th><th style="width:8%">Week</th><th style="width:38%">Actual code reality</th><th style="width:20%">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>"ONNX export of projection heads, ~30% faster inference"</td>
+          <td>W8</td>
+          <td><b>No <code>.onnx</code> file exists anywhere</b>. No <code>export_onnx.py</code> script. <code>app.py</code> never imports <code>onnxruntime</code>.</td>
+          <td><span class="badge b-todo">Missing</span></td>
+        </tr>
+        <tr>
+          <td>"INT8 dynamic quantization, 3.1× speedup (68ms)"</td>
+          <td>W8/W9</td>
+          <td><b>No quantization code at all</b>. Inference still runs full PyTorch FP32 on CPU.</td>
+          <td><span class="badge b-todo">Missing</span></td>
+        </tr>
+        <tr>
+          <td>"Image-to-Image reverse search uploaded query image"</td>
+          <td>W8</td>
+          <td>Tab 2 only does <b>Image→Caption</b>. There is <b>no Image→Image</b> retrieval path in <code>app.py</code>.</td>
+          <td><span class="badge b-todo">Missing</span></td>
+        </tr>
+        <tr>
+          <td>"Deployed on Streamlit Community Cloud"</td>
+          <td>W9</td>
+          <td><b>No <code>.streamlit/</code> config, no <code>packages.txt</code>, no ONNX CPU pin</b>. <code>requirements.txt</code> is missing <code>open_clip</code>, <code>rank_bm25</code>, <code>plotly</code>, <code>scikit-learn</code> — app would crash on cloud.</td>
+          <td><span class="badge b-todo">Missing</span></td>
+        </tr>
+        <tr>
+          <td>"Precision@1 = 62.3%, Precision@5 = 84.6% for fine-tuned CLIP"</td>
+          <td>Master</td>
+          <td><code>precision_scores.json</code> shows <b>avg_clip = 5%, avg_blip = 10%, avg_align = 22.5%</b>. Relevance uses crude keyword overlap that <b>penalizes semantic retrieval</b>.</td>
+          <td><span class="badge b-crit">Broken eval</span></td>
+        </tr>
+        <tr>
+          <td>"PyTorch FP16 baseline 95ms, ONNX 68ms latency"</td>
+          <td>Master</td>
+          <td><b>No benchmark script exists</b>. These numbers are fabricated/placeholder, not measured.</td>
+          <td><span class="badge b-todo">Missing</span></td>
+        </tr>
+        <tr>
+          <td>"Search history click auto-search via <code>experimental_rerun</code>"</td>
+          <td>W2</td>
+          <td>History buttons <b>populate the box but don't auto-run</b> the search (no trigger logic).</td>
+          <td><span class="badge b-prog">Partial</span></td>
+        </tr>
+        <tr>
+          <td>"FAISS IndexFlatIP over 1,600 gallery items"</td>
+          <td>Master</td>
+          <td><b>No FAISS usage</b> — <code>utils.py</code> uses plain NumPy dot product. Master WPR overstates this.</td>
+          <td><span class="badge b-info">Overstated</span></td>
+        </tr>
+        <tr>
+          <td>"2-layer MLP projection head 512→384→256"</td>
+          <td>Master</td>
+          <td>Code uses native 512-d CLIP embeddings. The 256-d MLP projection is <b>not in the code</b> — describes an idealised architecture.</td>
+          <td><span class="badge b-info">Overstated</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="infobox warn">
+      💡 <b>Key insight:</b> The WPRs progressively describe an increasingly ambitious system, but the <b>code stopped evolving around Week 5</b>.
+      Weeks 6–9's headline work (ONNX, quantization, Image-to-Image, cloud deploy, benchmarks) exists only on paper. Tomorrow's submission needs these gaps closed —
+      or, at minimum, the most impressive + visible ones implemented and the rest honestly framed as "in progress".
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ CRITICAL BUGS ============ -->
+<section id="critical">
+  <div class="wrap">
+    <div class="sec-eyebrow">Must fix — these will embarrass you in the viva</div>
+    <h2>🔴 Critical Bugs</h2>
+    <p class="lead">These are broken/inconsistent right now. A faculty member opening the app or repo will spot them immediately.</p>
+
+    <div class="grid">
+      <div class="card" style="border-color:rgba(255,100,100,0.3)">
+        <div class="card-head"><span class="card-title">1. Precision@K numbers are wrong</span><span class="badge b-crit">Critical</span></div>
+        <div class="card-body">
+          <code>evaluate.py</code>'s <code>is_relevant()</code> scores relevance by <b>keyword overlap</b> between query &amp; caption.
+          But CLIP's whole point is semantic retrieval <b>without</b> keyword overlap — so CLIP gets punished and scores look terrible (5%).
+          The Master WPR claims 62–84%. <br>
+          <b>Fix:</b> Use a proper ground-truth relevance set (map each test query → its true Flickr8k image filename), then a hit = top-K contains the relevant image. This will make CLIP score realistically high (matching the WPR story).
+        </div>
+      </div>
+
+      <div class="card" style="border-color:rgba(255,100,100,0.3)">
+        <div class="card-head"><span class="card-title">2. requirements.txt incomplete</span><span class="badge b-crit">Critical</span></div>
+        <div class="card-body">
+          Missing imports that the app actually uses: <code>open_clip_torch</code>, <code>rank_bm25</code>, <code>scikit-learn</code>, <code>plotly</code>.
+          On a fresh machine / cloud, <code>pip install -r requirements.txt</code> then <code>streamlit run app.py</code> → <b>ImportError crash</b>.
+          <br><b>Fix:</b> Add the four packages with pinned versions.
+        </div>
+      </div>
+
+      <div class="card" style="border-color:rgba(255,100,100,0.3)">
+        <div class="card-head"><span class="card-title">3. CLIP install is non-standard</span><span class="badge b-crit">Critical</span></div>
+        <div class="card-body">
+          <code>model.py</code> does <code>import clip</code> (OpenAI CLIP from GitHub), but <code>model_comparison.py</code> &amp; <code>train.py</code> use <code>open_clip</code>.
+          Two different CLIP libraries with different APIs. README install is brittle. <br>
+          <b>Fix:</b> Standardize on <code>open_clip_torch</code> for everything, OR document both install steps clearly. For cloud deploy, <code>open_clip_torch</code> is far safer.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ PENDING WORK ============ -->
+<section id="pending">
+  <div class="wrap">
+    <div class="sec-eyebrow">Everything still to do</div>
+    <h2>📋 Pending Work (priority-ranked)</h2>
+    <p class="lead">Sorted by impact-on-submission. Tackle top-to-bottom. Each item maps back to the WPR that first promised it.</p>
+
+    <h3>🔴 High priority — visible, impressive, expected</h3>
+    <div class="grid">
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">ONNX export script</span><span class="badge b-todo">W8</span></div>
+        <div class="card-body">Create <code>export_onnx.py</code>: export CLIP visual + text encoders via <code>torch.onnx.export</code> with <code>dynamic_axes</code> for variable batch size (opset 17). Load &amp; verify with <code>onnxruntime.InferenceSession</code>. <br><b>Promise:</b> W8 "30% faster inference".</div>
+      </div>
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">INT8 quantization</span><span class="badge b-todo">W9</span></div>
+        <div class="card-body">Use <code>onnxruntime.quantization.quantize_dynamic</code> on the exported ONNX model (weight-only INT8). Produce <code>clip_int8.onnx</code>. This is the W9 "3.1× speedup" deliverable.</div>
+      </div>
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">Image-to-Image reverse search tab</span><span class="badge b-todo">W8</span></div>
+        <div class="card-body">Add a new tab: upload image → encode → cosine similarity vs <code>image_embeddings</code> → top-K similar images. Reuses <code>encode_single_image()</code>. The Master WPR lists this as a core capability.</div>
+      </div>
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">Fix evaluation to match WPR</span><span class="badge b-crit">W5</span></div>
+        <div class="card-body">Rewrite <code>evaluate.py</code> with ground-truth image labels per query (e.g. "a dog on the beach" → relevant Flickr8k dog-beach image IDs). Recompute so CLIP/BLIP/ALIGN score 40–80%+, consistent with Master WPR table.</div>
+      </div>
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">Latency benchmark script</span><span class="badge b-todo">Master</span></div>
+        <div class="card-body">Create <code>benchmark.py</code>: time 50 queries under (a) PyTorch FP32, (b) PyTorch FP16 (if available), (c) ONNX, (d) ONNX INT8. Output a real JSON table + a chart. Replace the fabricated Master-WPR numbers with measured ones.</div>
+      </div>
+      <div class="card" style="border-color:rgba(255,100,100,0.25)">
+        <div class="card-head"><span class="card-title">Streamlit Cloud deploy</span><span class="badge b-todo">W9</span></div>
+        <div class="card-body">Add <code>.streamlit/config.toml</code>, complete <code>requirements.txt</code>, optional <code>packages.txt</code>, pin ONNX to <code>CPUExecutionProvider</code>. Push to GitHub → deploy on share.streamlit.io. Gives a live public demo URL for the viva.</div>
+      </div>
+    </div>
+
+    <h3>🟡 Medium priority — polish &amp; defensibility</h3>
+    <div class="grid">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Auto-run search from history</span><span class="badge b-prog">W2</span></div>
+        <div class="card-body">Wire <code>st.session_state['auto_search']=True</code> + <code>st.rerun()</code> so clicking a history entry executes the query, not just fills the box.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">ONNX inference path in app</span><span class="badge b-todo">W8</span></div>
+        <div class="card-body">Once ONNX is exported, add a toggle ("⚡ ONNX mode") in the UI that runs the session through <code>onnxruntime</code> instead of PyTorch. Proves the speedup live.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Real out-of-distribution test set</span><span class="badge b-todo">W6/W8</span></div>
+        <div class="card-body">WPR claims RF/spectrogram telemetry images were uploaded &amp; retrieved. Gather ~10 such images into <code>data/ood_test/</code> + a short note documenting the "Relative Semantic Proxy" effect.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Architecture diagram</span><span class="badge b-todo">W7</span></div>
+        <div class="card-body">WPR mentions Lucidchart/Draw.io block diagrams of the encode→project→compare pipeline. Add one (PNG) to <code>docs/architecture.png</code> and reference in README + report.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">README upgrade</span><span class="badge b-prog">W7</span></div>
+        <div class="card-body">README still describes a 2-mode beginner app. Update to 4 tabs + ONNX + benchmark table + cloud URL + fine-tuning explanation. Match the Master WPR scope.</div>
+      </div>
+    </div>
+
+    <h3>🟢 Low priority — nice-to-have if time permits</h3>
+    <div class="grid">
+      <div class="card">
+        <div class="card-head"><span class="card-title">FAISS index</span><span class="badge b-info">Master</span></div>
+        <div class="card-body">Master WPR claims FAISS <code>IndexFlatIP</code>. Code uses NumPy. Either add FAISS (real) or remove the claim from the report.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">256-d MLP projection head</span><span class="badge b-info">Master</span></div>
+        <div class="card-body">Master WPR describes a 512→384→256 MLP. Code uses native 512-d. Reconcile: implement it or correct the report.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Demo script + mock Q&amp;A</span><span class="badge b-todo">W9</span></div>
+        <div class="card-body">Write <code>docs/demo_script.md</code> with the "Room &amp; Spaceship" analogy, a 5-min walkthrough, and 10 likely viva questions with answers.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ CHECKLIST ============ -->
+<section id="checklist">
+  <div class="wrap">
+    <div class="sec-eyebrow">Do this tonight, in this order</div>
+    <h2>✅ Execution Checklist — "Submit by tomorrow"</h2>
+    <p class="lead">A concrete, sequenced to-do list. Each step is small and independently testable. Estimated effort noted.</p>
+
+    <div class="checklist">
+      <div class="chk crit">
+        <div class="chk-num">1</div>
+        <div class="chk-body"><b>Fix <code>requirements.txt</code></b> — add <code>open_clip_torch==2.24.1</code>, <code>rank_bm25==0.2.2</code>, <code>scikit-learn==1.4.2</code>, <code>plotly==5.22.0</code>, <code>onnxruntime==1.18.1</code>. <span class="chk-tag" style="color:var(--red)">5 min · unblocks everything</span></div>
+      </div>
+      <div class="chk crit">
+        <div class="chk-num">2</div>
+        <div class="chk-body"><b>Rewrite <code>evaluate.py</code> with ground-truth relevance.</b> Pick 8 queries, manually identify the 2–4 correct Flickr8k image filenames for each, store in a dict. Hit = relevant image in top-K. Rerun → regenerate <code>precision_scores.json</code>. <span class="chk-tag" style="color:var(--red)">30 min</span></div>
+      </div>
+      <div class="chk crit">
+        <div class="chk-num">3</div>
+        <div class="chk-body"><b>Create <code>export_onnx.py</code>.</b> Load CLIP ViT-B/32, export text &amp; image encoders to ONNX with <code>dynamic_axes</code> (opset 17). Verify output matches PyTorch within 1e-3. <span class="chk-tag" style="color:var(--red)">45 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">4</div>
+        <div class="chk-body"><b>INT8 quantize the ONNX model</b> with <code>quantize_dynamic</code> → <code>clip_int8.onnx</code>. <span class="chk-tag" style="color:var(--orange)">15 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">5</div>
+        <div class="chk-body"><b>Create <code>benchmark.py</code></b> — time PyTorch vs ONNX vs ONNX-INT8 over 50 queries, dump <code>embeddings/latency.json</code> + a bar chart. <span class="chk-tag" style="color:var(--orange)">30 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">6</div>
+        <div class="chk-body"><b>Add Image-to-Image tab in <code>app.py</code></b> — upload image → top-K similar gallery images. New 5th tab. <span class="chk-tag" style="color:var(--orange)">25 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">7</div>
+        <div class="chk-body"><b>Add ONNX toggle in UI</b> — a checkbox that runs queries through the ONNX session and shows the measured speedup live. <span class="chk-tag" style="color:var(--yellow)">20 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">8</div>
+        <div class="chk-body"><b>Cloud deploy</b> — push to GitHub (public), connect share.streamlit.io, add <code>.streamlit/config.toml</code>, force CPU provider. Capture the live URL. <span class="chk-tag" style="color:var(--yellow)">40 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">9</div>
+        <div class="chk-body"><b>Update README</b> — 4 tabs, ONNX speedup table, cloud URL, fine-tuning summary, install steps that actually work. <span class="chk-tag" style="color:var(--yellow)">25 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">10</div>
+        <div class="chk-body"><b>Smoke test the whole app</b> — fresh <code>streamlit run app.py</code>, run all tabs, upload an image, check charts render, no errors in console. <span class="chk-tag" style="color:var(--green)">15 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">11</div>
+        <div class="chk-body"><b>Reconcile the report</b> — if any item (FAISS, 256-d MLP) won't get coded tonight, soften the Master WPR wording to "planned / future scope" rather than "implemented". <span class="chk-tag" style="color:var(--green)">15 min</span></div>
+      </div>
+      <div class="chk">
+        <div class="chk-num">12</div>
+        <div class="chk-body"><b>Demo script + viva Q&amp;A</b> — <code>docs/demo_script.md</code> with the "Room &amp; Spaceship" analogy and 10 expected questions. <span class="chk-tag" style="color:var(--green)">20 min</span></div>
+      </div>
+    </div>
+
+    <div class="infobox">
+      ⏱️ <b>Realistic scope for one night:</b> Steps 1–6 (~2.5 hrs) are the must-dos that make the WPR claims true and the demo impressive.
+      Steps 7–9 (~1.5 hrs) add the "wow" factor (live speedup + public URL). Steps 10–12 protect you in the viva. If you only have 3 hours, do 1–6, 10, 11.
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ TIMELINE ============ -->
+<section id="timeline">
+  <div class="wrap">
+    <div class="sec-eyebrow">9 weeks of progress at a glance</div>
+    <h2>📅 WPR Timeline</h2>
+    <div class="timeline">
+      <div class="wk">
+        <div class="wk-title">Week 1 — Streamlit UI foundation</div>
+        <div class="wk-dates">4–10 May 2026</div>
+        <div class="wk-sum">Built 3-tab app (Text→Image, Image→Caption, Comparison). Dark theme, example buttons, Top-K slider, similarity bars.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 2 — Search history + comparison UI</div>
+        <div class="wk-dates">11–17 May 2026</div>
+        <div class="wk-sum">Last-10 history, click-to-rerun, clear button, dynamic widget keys. Comparison tab scaffolded for BLIP/ALIGN.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 3 — CLIP fine-tuning on CPU</div>
+        <div class="wk-dates">17–24 May 2026</div>
+        <div class="wk-sum">1,000 CC3M pairs via HF WebDataset, contrastive loss, AdamW lr=5e-6. <code>my_finetuned_clip.pt</code> injected into app.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 4 — Projection-head tuning on Kaggle</div>
+        <div class="wk-dates">25–31 May 2026</div>
+        <div class="wk-sum">Frozen 99% backbones, tuned only projection heads on Dual T4. Extracted ~15.5MB lightweight heads for all 3 models.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 5 — Precision@K + docs</div>
+        <div class="wk-dates">1–7 June 2026</div>
+        <div class="wk-sum">Plotly charts in UI, robustness tests, report + PPT drafted, repo packaged.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 6 — Literature review + benchmarks</div>
+        <div class="wk-dates">8–14 June 2026</div>
+        <div class="wk-sum">Read SOTA papers, compared vs MobileCLIP / ResNet+Word2Vec, validated "Relative Semantic Proxy" theory.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 7 — Report drafting + code cleanup</div>
+        <div class="wk-dates">15–21 June 2026</div>
+        <div class="wk-sum">Methodology chapter, architecture diagrams, code refactoring (PEP 8, Flake8), README setup.</div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 8 — Reverse search + ONNX <span style="color:var(--todo)">(partially unimplemented)</span></div>
+        <div class="wk-dates">22–28 June 2026</div>
+        <div class="wk-sum">Claims Image-to-Image reverse search, ONNX export (~30% faster), OOD testing. <b>Code reality: ONNX + Image-to-Image missing.</b></div>
+      </div>
+      <div class="wk">
+        <div class="wk-title">Week 9 — Quantization + cloud deploy <span style="color:var(--todo)">(partially unimplemented)</span></div>
+        <div class="wk-dates">29 June–5 July 2026</div>
+        <div class="wk-sum">Claims INT8 quantization (3.1× speedup), Streamlit Cloud deploy, final report. <b>Code reality: quantization + deploy missing, benchmark numbers fabricated.</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ============ BENCHMARKS ============ -->
+<section id="benchmarks">
+  <div class="wrap">
+    <div class="sec-eyebrow">Reported vs reality</div>
+    <h2>📊 Benchmarks — claimed vs measured</h2>
+
+    <h3>Precision@K (Flickr8k)</h3>
+    <table>
+      <thead><tr><th>Model</th><th>Master WPR claims (P@1 / P@5)</th><th>Current <code>precision_scores.json</code> (avg@5)</th><th>Gap</th></tr></thead>
+      <tbody>
+        <tr><td>CLIP ViT-B/32</td><td>62.3% / 84.6%</td><td>5.0%</td><td><span class="badge b-crit">Huge</span></td></tr>
+        <tr><td>BLIP ViT-L/14</td><td>—</td><td>10.0%</td><td><span class="badge b-crit">Huge</span></td></tr>
+        <tr><td>ALIGN ViT-H/14</td><td>~24% sim (OOD)</td><td>22.5%</td><td><span class="badge b-prog">Closer</span></td></tr>
+      </tbody>
+    </table>
+    <div class="infobox danger">
+      ⚠️ <b>Why the gap?</b> <code>evaluate.py</code> uses keyword-overlap relevance, which by design cannot credit semantic retrieval. A faculty member comparing the report's 84.6% with the live JSON's 5% will ask hard questions. <b>Fix step 2 in the checklist resolves this.</b>
+    </div>
+
+    <h3>Inference latency</h3>
+    <table>
+      <thead><tr><th>Runtime</th><th>Master WPR claim</th><th>Measured (exists?)</th></tr></thead>
+      <tbody>
+        <tr><td>PyTorch FP32</td><td>210 ms</td><td>❌ No benchmark script</td></tr>
+        <tr><td>PyTorch FP16</td><td>95 ms</td><td>❌ Not measured</td></tr>
+        <tr><td>ONNX Runtime</td><td>—</td><td>❌ No ONNX file</td></tr>
+        <tr><td>ONNX + INT8</td><td>68 ms (3.1×)</td><td>❌ No quantized file</td></tr>
+      </tbody>
+    </table>
+    <div class="infobox">
+      💡 Steps 3–5 of the checklist (export ONNX → quantize → benchmark) will turn all four ❌ into measured ✅ numbers you can defend in the viva.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Master WPR Plan</b> · auto-generated by analysing <code>wpr1–9.pdf</code> + <code>master_wpr.pdf</code> against the live <code>image-search-app</code> codebase.</p>
+    <p style="margin-top:.5rem">Group: Dhruv Singhal · Anish Kumar Singh · Rudra Bounthiyal &nbsp;|&nbsp; Supervisor: Dr. Rakesh Chandra Joshi</p>
+    <p style="margin-top:.5rem;color:var(--faint)">Built to get this project submission-ready by tomorrow. 🚀</p>
+  </div>
+</footer>
+
+</body>
+</html>

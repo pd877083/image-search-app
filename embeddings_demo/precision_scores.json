@@ -1,0 +1,124 @@
+{
+  "queries": [
+    "a dog on the beach",
+    "children playing football",
+    "a woman cooking in the kitchen",
+    "snow covered mountains",
+    "a man riding a bike",
+    "people sitting at a table",
+    "a cat sitting on a chair",
+    "a baby playing outdoors"
+  ],
+  "clip": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+  ],
+  "blip": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "align": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "avg_clip": 0.875,
+  "avg_blip": 0.0,
+  "avg_align": 0.25,
+  "k": 5,
+  "report": {
+    "1": {
+      "clip": 0.75,
+      "blip": 0.0,
+      "align": 0.125
+    },
+    "5": {
+      "clip": 0.875,
+      "blip": 0.0,
+      "align": 0.25
+    },
+    "10": {
+      "clip": 0.875,
+      "blip": 0.0,
+      "align": 0.25
+    }
+  },
+  "ground_truth": {
+    "a dog on the beach": [
+      "140430106_2978fda105.jpg",
+      "1057251835_6ded4ada9c.jpg",
+      "2281006675_fde04e93dd.jpg",
+      "1526325728_74eb4153d8.jpg"
+    ],
+    "children playing football": [
+      "2337919839_df83827fa0.jpg",
+      "2256231539_05c27179f1.jpg",
+      "2194495372_bdac7d9e71.jpg",
+      "197504190_fd1fc3d4b7.jpg"
+    ],
+    "a woman cooking in the kitchen": [
+      "1428641354_f7453afbea.jpg",
+      "2085557551_7a88d01d4e.jpg",
+      "1798209205_77dbf525b0.jpg"
+    ],
+    "snow covered mountains": [
+      "2065309381_705b774f51.jpg",
+      "224273695_0b517bd0eb.jpg",
+      "2271671533_7538ccd556.jpg",
+      "223299142_521aedf9e7.jpg"
+    ],
+    "a man riding a bike": [
+      "2075321027_c8fcbaf581.jpg",
+      "2192411521_9c7e488c5e.jpg",
+      "2137789511_69a6c6afa8.jpg",
+      "191003284_1025b0fb7d.jpg"
+    ],
+    "people sitting at a table": [
+      "107582366_d86f2d3347.jpg",
+      "2206594874_5e0087c6b7.jpg",
+      "1258913059_07c613f7ff.jpg",
+      "2206600240_f65df56a09.jpg"
+    ],
+    "a cat sitting on a chair": [
+      "2218743570_9d6614c51c.jpg",
+      "2098646162_e3b3bbf14c.jpg",
+      "124972799_de706b6d0b.jpg"
+    ],
+    "a baby playing outdoors": [
+      "2059842472_f4fb61ea08.jpg",
+      "1332815795_8eea44375e.jpg",
+      "2171576939_d1e72daab2.jpg",
+      "1112212364_0c48235fc2.jpg"
+    ]
+  },
+  "ground_truth_counts": {
+    "a dog on the beach": 4,
+    "children playing football": 4,
+    "a woman cooking in the kitchen": 3,
+    "snow covered mountains": 4,
+    "a man riding a bike": 4,
+    "people sitting at a table": 4,
+    "a cat sitting on a chair": 3,
+    "a baby playing outdoors": 4
+  },
+  "gallery_size": 1600,
+  "gallery_total": 8091,
+  "metric": "Hit@K (binary) with manual Flickr8k ground-truth image IDs"
+}
