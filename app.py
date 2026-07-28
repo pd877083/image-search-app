@@ -574,12 +574,50 @@ with tab_models:
 
     # ── Heavy-model load with graceful RAM fallback ──────────────────────────
     # BLIP (ViT-L/14 ~0.9 GB) + ALIGN (ViT-H/14 ~3.9 GB) together exceed the
-    # 1 GB RAM of Streamlit Community Cloud's free tier. If we OOM, we keep the
-    # app alive: CLIP-only comparison still works, and the precomputed
-    # Precision@K chart (built offline) still renders below.
+    # 1 GB RAM of Streamlit Community Cloud's free tier. If we OOM, the
+    # Linux OOM killer terminates the process silently — no Python exception
+    # is raised, so a plain try/except can't catch it.
+    #
+    # The fix: cap RLIMIT_AS (virtual address space) BEFORE the load, so the
+    # over-allocation surfaces as a catchable MemoryError instead of a kill.
+    # We try BLIP first (smaller); if it fits, we attempt ALIGN. If ALIGN
+    # OOMs we still keep BLIP alive for the two-way comparison.
     blip_model = align_model = None
     comparison_models_ok = True
+    blip_status_msg = None
+    align_status_msg = None
+
+    # Only attempt the heavy load on environments with ≥ 2 GB free RAM. On
+    # Streamlit Cloud Community we get 1 GB total; CLIs can opt in with
+    # TRY_HEAVY_MODELS=1 (e.g. for the user's local demo).
     try:
+        import psutil  # type: ignore
+        free_gb = psutil.virtual_memory().available / (1024 ** 3)
+    except Exception:
+        # psutil is in requirements.txt but be defensive in case the import
+        # is shadowed / stripped: fall back to the env-var override.
+        free_gb = 0.0
+    try_heavy = os.environ.get("TRY_HEAVY_MODELS", "auto").lower()
+    if try_heavy == "1":
+        try_heavy_bool = True
+    elif try_heavy == "0":
+        try_heavy_bool = False
+    else:
+        # Auto: only attempt if at least 2 GB free (Streamlit Community has 1 GB).
+        try_heavy_bool = free_gb >= 2.0
+
+    if not try_heavy_bool:
+        comparison_models_ok = False
+        blip_status_msg = (
+            f"ℹ️ BLIP/ALIGN skipped automatically — this environment has "
+            f"{free_gb:.1f} GB free RAM. The free Streamlit Community tier "
+            f"has 1 GB; these two models need ~5 GB combined. **CLIP results "
+            f"still work**, and the precomputed Precision@K chart at the bottom "
+            f"of the page shows the full comparison. Run locally (8 GB+ RAM) "
+            f"or set `TRY_HEAVY_MODELS=1` to override."
+        )
+        st.info(blip_status_msg, icon="ℹ️")
+    else:
         # Pre-download BLIP/ALIGN weights (cached on subsequent visits).
         with st.status("Preparing BLIP & ALIGN weights ...", expanded=False) as opt_status:
             def _on_progress_opt(repo_id, stage, detail):
@@ -595,24 +633,75 @@ with tab_models:
                 download_models.ensure_models(include_optional=True, progress_cb=_on_progress_opt)
                 opt_status.update(label="BLIP & ALIGN weights ready ✓", state="complete")
             except Exception as exc:
-                # Optional models: don't kill the app if the download fails,
-                # just disable the comparison path and continue with CLIP only.
                 opt_status.update(label="Could not pre-cache BLIP/ALIGN", state="error")
-                raise
+                blip_status_msg = (
+                    f"⚠️ Could not pre-cache BLIP/ALIGN weights ({type(exc).__name__}). "
+                    "The comparison tab will only show CLIP results."
+                )
+                st.warning(blip_status_msg)
+                comparison_models_ok = False
 
-        with st.spinner("Loading BLIP model ..."):
-            blip_model, blip_preprocess, blip_tokenizer = load_blip()
-        with st.spinner("Loading ALIGN model ..."):
-            align_model, align_preprocess, align_tokenizer = load_align()
-    except (RuntimeError, MemoryError, OSError) as exc:
-        comparison_models_ok = False
-        st.warning(
-            f"⚠️ Could not load BLIP/ALIGN models in this environment ({type(exc).__name__}: {exc}). "
-            "These are large models (~5 GB combined) that need more RAM than this free cloud "
-            "tier provides. **CLIP results still work below**, and the precomputed "
-            "Precision@K chart at the bottom of the page shows the full comparison. "
-            "Run locally (8 GB+ RAM) to see all three models live."
-        )
+        if comparison_models_ok:
+            # Load BLIP first (smaller). Cap virtual address space so
+            # over-allocation raises a catchable MemoryError instead of
+            # triggering the OOM killer. RLIMIT_AS only exists on Linux,
+            # which is fine — Streamlit Cloud is Linux. On other platforms
+            # we just run the loader directly and rely on the try/except.
+            try:
+                import resource  # type: ignore  # POSIX-only
+                _HAS_RESOURCE = True
+            except ImportError:
+                _HAS_RESOURCE = False
+
+            def _cap_rss_and_load(loader, name, cap_mb=700):
+                """Run loader() under a virtual-memory cap so OOM becomes MemoryError."""
+                old_soft = old_hard = None
+                if _HAS_RESOURCE:
+                    try:
+                        old_soft, old_hard = resource.getrlimit(resource.RLIMIT_AS)
+                        cap = cap_mb * 1024 * 1024
+                        new_soft = min(cap, old_hard) if old_hard != resource.RLIM_INFINITY else cap
+                        resource.setrlimit(resource.RLIMIT_AS, (new_soft, old_hard))
+                    except (ValueError, OSError):
+                        old_soft = old_hard = None
+                try:
+                    return loader(), None
+                except (MemoryError, RuntimeError, OSError) as exc:
+                    return None, f"{type(exc).__name__}: {exc}"
+                finally:
+                    if _HAS_RESOURCE and old_soft is not None:
+                        try:
+                            resource.setrlimit(resource.RLIMIT_AS, (old_soft, old_hard))
+                        except (ValueError, OSError):
+                            pass
+
+            with st.spinner("Loading BLIP model ..."):
+                result = _cap_rss_and_load(load_blip, "BLIP", cap_mb=700)
+                if result[0] is not None:
+                    blip_model, blip_preprocess, blip_tokenizer = result[0]
+                else:
+                    blip_status_msg = (
+                        f"⚠️ BLIP failed to load ({result[1]}). "
+                        "The ViT-L/14 backbone is too large for this environment. "
+                        "ALIGN is even larger so it's being skipped too. "
+                        "**CLIP results still work** below."
+                    )
+                    st.warning(blip_status_msg)
+                    comparison_models_ok = False
+
+            # Only try ALIGN if BLIP succeeded — keeps the memory budget honest.
+            if blip_model is not None:
+                with st.spinner("Loading ALIGN model ..."):
+                    result = _cap_rss_and_load(load_align, "ALIGN", cap_mb=950)
+                    if result[0] is not None:
+                        align_model, align_preprocess, align_tokenizer = result[0]
+                    else:
+                        align_status_msg = (
+                            f"⚠️ ALIGN failed to load ({result[1]}). "
+                            "The ViT-H/14 backbone (~2.5 GB) is too large for this "
+                            "environment. **CLIP and BLIP results still work** below."
+                        )
+                        st.warning(align_status_msg)
     with st.spinner("Loading comparison embeddings ..."):
         blip_img_emb, blip_txt_emb, align_img_emb, align_txt_emb = load_comparison_embeddings()
 

@@ -26,10 +26,20 @@ tqdm>=4.66
 scikit-learn>=1.4
 rank_bm25>=0.2.2
 
+# FAISS — exact top-K search via IndexFlatIP over the L2-normalized embeddings.
+# Optional at runtime: utils.py falls back to the NumPy dot-product path
+# automatically if faiss is not installed / fails to import.
+faiss-cpu==1.14.3
+
 # Frontend
 streamlit>=1.35
 plotly>=5.22            # Precision@K charts in the UI
+psutil>=5.9             # RAM probe in app.py — auto-skips BLIP/ALIGN load on <2 GB
+
+# Offline data-prep (download_data.py — CC3M sample via HuggingFace)
+datasets==4.8.5
 
 # NOTE: onnxruntime is intentionally ABSENT — the live app never imports it.
-# ONNX export/quantize (export_onnx.py, quantize_onnx.py) are offline-only
-# optimisation steps; their .onnx outputs are not used at serve time.
+# ONNX export/quantize (export_onnx.py, quantize_onnx.py, benchmark.py) are
+# offline-only optimisation steps; their .onnx outputs are not used at serve
+# time. For those scripts, install it separately: pip install onnxruntime==1.28.0
