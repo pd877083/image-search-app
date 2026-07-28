@@ -6,6 +6,22 @@ and encoding both images and text into the shared embedding space.
 """
 
 import os
+from pathlib import Path
+
+# ── HuggingFace cache redirection (must happen BEFORE importing open_clip) ─
+# On Streamlit Cloud the default cache lives outside the project (and outside
+# the persistent disk in some cases), so the 150 MB CLIP download would be
+# re-fetched on every cold start. Point HF_HOME at a project-local directory
+# that download_models.py populates. We set it unconditionally because
+# huggingface_hub will create the directory on demand.
+_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
+_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+
+# FP16 halves RAM at load time — critical for the 1 GB Streamlit Cloud
+# sandbox. Toggle via env var if you need FP32 for exact numerics.
+USE_FP16 = os.environ.get("CLIP_FP16", "1") == "1"
+
 import torch
 import open_clip
 from PIL import Image
@@ -53,9 +69,29 @@ def load_clip_model(model_name: str = "ViT-B/32"):
     print(f"[CLIP] Loading model '{open_clip_name}' (openai) on {DEVICE} …")
 
     # force_quick_gelu=True matches OpenAI CLIP weights (needed on open_clip ≥3.x)
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        open_clip_name, pretrained="openai", force_quick_gelu=True
-    )
+    # precision='fp16' halves RAM at load (≈600 MB → ≈300 MB for ViT-B/32) which
+    # is the difference between fitting in the 1 GB Streamlit Cloud sandbox
+    # and being OOM-killed before the first user request completes.
+    try:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            open_clip_name,
+            pretrained="openai",
+            force_quick_gelu=True,
+            precision="fp16" if USE_FP16 else "fp32",
+        )
+    except TypeError:
+        # Older open_clip versions don't accept `precision=` — fall back to
+        # the legacy kwarg path, then cast to half manually if requested.
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            open_clip_name, pretrained="openai", force_quick_gelu=True
+        )
+        if USE_FP16:
+            model = model.half()
+    if USE_FP16 and DEVICE != "cpu":
+        # Half precision is only beneficial on CUDA. On CPU keep float32 to
+        # avoid silent numerical issues with the L2-normalised similarity math.
+        model = model.float()
+
     model = model.to(DEVICE)
     model.eval()          # inference-only — disables dropout / batch-norm updates
     _tokenizer = open_clip.get_tokenizer(open_clip_name)

@@ -3,6 +3,22 @@ app.py — Semantic Image Search · Streamlit UI
 """
 
 import os
+from pathlib import Path
+
+# ── HuggingFace cache redirection (BEFORE any HF/open_clip import) ──────────
+# On Streamlit Cloud the default HF cache lives outside the project tree, so
+# the CLIP weights would be re-fetched on every cold start. download_models.py
+# populates ./hf_cache/ at startup; point HF_HOME there so the subsequent
+# open_clip.create_model_and_transforms(...) call is offline-safe.
+#
+# Note: we set HF_HOME UNCONDITIONALLY (not setdefault) because the directory
+# is created later by download_models.py. huggingface_hub will auto-create
+# the parent dirs as needed, so the env var is safe to set even if the cache
+# hasn't been populated yet.
+_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
+_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+
 import io
 import time
 import importlib.util
@@ -30,6 +46,42 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ── Pre-flight: ensure model weights are cached locally ─────────────────────
+# On Streamlit Cloud the first request triggers a 150 MB+ download from
+# HuggingFace. Doing it here (with a visible status widget + retry logic)
+# turns a silent OOM/network-kill into a clear, recoverable error for the
+# user. Idempotent — a warm cache skips straight to "ready".
+import download_models  # noqa: E402  (after HF_HOME redirect above)
+
+with st.status("Preparing models (one-time, ~150 MB on first run) ...", expanded=True) as status_box:
+    def _on_progress(repo_id, stage, detail):
+        if stage == "cached":
+            status_box.write(f"✅ {repo_id} — already cached")
+        elif stage == "downloading":
+            status_box.write(f"⬇️ {repo_id} — {detail}")
+        elif stage == "ready":
+            status_box.write(f"✅ {repo_id} — ready")
+        elif stage == "error":
+            status_box.write(f"❌ {repo_id} — {detail}")
+
+    try:
+        download_models.ensure_models(include_optional=False, progress_cb=_on_progress)
+        status_box.update(label="Models ready ✓", state="complete")
+    except Exception as exc:
+        status_box.update(label="Model download failed", state="error")
+        st.error(
+            f"**Couldn't fetch the CLIP model from HuggingFace.**\n\n"
+            f"`{type(exc).__name__}: {exc}`\n\n"
+            f"This is usually one of:\n"
+            f"- A transient HuggingFace rate-limit — try **Reboot app** in the\n"
+            f"  Streamlit Cloud menu (top-right).\n"
+            f"- A blocked egress from the cloud sandbox — check that\n"
+            f"  `huggingface.co` is reachable.\n\n"
+            f"For higher rate limits, add a free `HF_TOKEN` to your app's\n"
+            f"**Secrets** (https://huggingface.co/settings/tokens)."
+        )
+        st.stop()
 
 st.markdown("""
 <style>
@@ -119,12 +171,21 @@ def load_model():
         state_dict = torch.load(full_checkpoint, map_location='cpu', weights_only=True)
         if any(k.startswith('module.') for k in state_dict.keys()):
             state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        # .pt files are saved in fp32; the in-memory model may be fp16
+        # (CLIP_FP16=1, default — keeps RSS under the 1 GB Cloud sandbox
+        # limit). Cast the state dict to the model's dtype to avoid a
+        # "Found dtype Float vs Half" error from load_state_dict.
+        model_param = next(model.parameters())
+        state_dict = {k: v.to(dtype=model_param.dtype) for k, v in state_dict.items()}
         model.load_state_dict(state_dict)
         print("Fine-tuned CLIP weights injected successfully!")
     elif os.path.exists(light_checkpoint):
         print(f"Loading lightweight fine-tuned CLIP weights from {light_checkpoint}...")
         state_dict = torch.load(light_checkpoint, map_location='cpu', weights_only=True)
         # Srf projection heads badalne ke liye strict=False zaroori hai!
+        # Same dtype-alignment dance as above.
+        model_param = next(model.parameters())
+        state_dict = {k: v.to(dtype=model_param.dtype) for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=False)
         print("Lightweight CLIP weights injected successfully!")
     else:
@@ -138,17 +199,20 @@ def load_blip():
     import os
     # Base model configuration load karega
     model, preprocess, tokenizer = load_blip_model()
-    
+
     checkpoint_path = "light_blip_heads.pt"
     if os.path.exists(checkpoint_path):
         print(f"Loading lightweight fine-tuned BLIP weights from {checkpoint_path}...")
-        state_dict = torch.load(checkpoint_path, map_location='cpu')
-        # Overwriting dynamic heads safely
+        state_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
+        # Overwriting dynamic heads safely. Align dtypes with the (possibly
+        # fp16) in-memory model — see load_model() for the same fix.
+        model_param = next(model.parameters())
+        state_dict = {k: v.to(dtype=model_param.dtype) for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=False)
         print("Lightweight BLIP weights injected successfully!")
     else:
         print("⚠️ light_blip_heads.pt not found! Using default weights.")
-        
+
     return model, preprocess, tokenizer
 
 @st.cache_resource(show_spinner=False)
@@ -157,17 +221,20 @@ def load_align():
     import os
     # Base configuration download from hub
     model, preprocess, tokenizer = load_align_model()
-    
+
     checkpoint_path = "light_align_heads.pt"
     if os.path.exists(checkpoint_path):
         print(f"Loading lightweight fine-tuned ALIGN weights from {checkpoint_path}...")
-        state_dict = torch.load(checkpoint_path, map_location='cpu')
+        state_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
         # Heavy backbone safe rakh kar mapping heads deploy karna
+        # (same dtype-alignment dance as load_model / load_blip).
+        model_param = next(model.parameters())
+        state_dict = {k: v.to(dtype=model_param.dtype) for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=False)
         print("Lightweight ALIGN weights injected successfully!")
     else:
         print("⚠️ light_align_heads.pt not found! Using default weights.")
-        
+
     return model, preprocess, tokenizer
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -513,14 +580,34 @@ with tab_models:
     blip_model = align_model = None
     comparison_models_ok = True
     try:
+        # Pre-download BLIP/ALIGN weights (cached on subsequent visits).
+        with st.status("Preparing BLIP & ALIGN weights ...", expanded=False) as opt_status:
+            def _on_progress_opt(repo_id, stage, detail):
+                if stage == "cached":
+                    opt_status.write(f"✅ {repo_id} — cached")
+                elif stage == "downloading":
+                    opt_status.write(f"⬇️ {repo_id} — {detail}")
+                elif stage == "ready":
+                    opt_status.write(f"✅ {repo_id} — ready")
+                elif stage == "error":
+                    opt_status.write(f"❌ {repo_id} — {detail}")
+            try:
+                download_models.ensure_models(include_optional=True, progress_cb=_on_progress_opt)
+                opt_status.update(label="BLIP & ALIGN weights ready ✓", state="complete")
+            except Exception as exc:
+                # Optional models: don't kill the app if the download fails,
+                # just disable the comparison path and continue with CLIP only.
+                opt_status.update(label="Could not pre-cache BLIP/ALIGN", state="error")
+                raise
+
         with st.spinner("Loading BLIP model ..."):
             blip_model, blip_preprocess, blip_tokenizer = load_blip()
         with st.spinner("Loading ALIGN model ..."):
             align_model, align_preprocess, align_tokenizer = load_align()
-    except (RuntimeError, MemoryError) as exc:
+    except (RuntimeError, MemoryError, OSError) as exc:
         comparison_models_ok = False
         st.warning(
-            f"⚠️ Could not load BLIP/ALIGN models in this environment ({type(exc).__name__}). "
+            f"⚠️ Could not load BLIP/ALIGN models in this environment ({type(exc).__name__}: {exc}). "
             "These are large models (~5 GB combined) that need more RAM than this free cloud "
             "tier provides. **CLIP results still work below**, and the precomputed "
             "Precision@K chart at the bottom of the page shows the full comparison. "

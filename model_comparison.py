@@ -9,6 +9,19 @@ Model mapping:
 """
 
 import os
+from pathlib import Path
+
+# Redirect HF cache BEFORE importing open_clip — same rationale as model.py.
+_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
+_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+
+# CPU memory is the bottleneck on Streamlit Cloud (1 GB). For ViT-L/14
+# (~890 MB) and ViT-H/14 (~2.5 GB) float32 weights easily OOM the sandbox,
+# so default to fp16 at serve time. Heavy backbones are loaded lazily —
+# the comparison tab is the only consumer.
+USE_FP16 = os.environ.get("CLIP_FP16", "1") == "1"
+
 import torch
 import numpy as np
 import open_clip
@@ -30,11 +43,27 @@ def _l2_normalise(vectors):
 
 def load_openclip_model(model_name, pretrained):
     print(f"[MODEL] Loading {model_name} ({pretrained}) ...")
-    # OpenAI checkpoints use QuickGELU; LAION / others use standard GELU
+    # OpenAI checkpoints use QuickGELU; LAION / others use standard GELU.
+    # precision='fp16' halves the RSS footprint of the ViT-L/14 + ViT-H/14
+    # backbones which is the difference between fitting in 1 GB and OOMing
+    # on Streamlit Cloud.
     kwargs = {"force_quick_gelu": True} if pretrained == "openai" else {}
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        model_name, pretrained=pretrained, **kwargs
-    )
+    if USE_FP16:
+        kwargs["precision"] = "fp16"
+    try:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            model_name, pretrained=pretrained, **kwargs
+        )
+    except TypeError:
+        # Older open_clip: no `precision=` kwarg, fall back and cast manually.
+        legacy_kwargs = {"force_quick_gelu": True} if pretrained == "openai" else {}
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            model_name, pretrained=pretrained, **legacy_kwargs
+        )
+        if USE_FP16:
+            model = model.half()
+    if USE_FP16 and DEVICE != "cpu":
+        model = model.float()
     tokenizer = open_clip.get_tokenizer(model_name)
     model = model.to(DEVICE)
     model.eval()

@@ -20,6 +20,12 @@ embeddings/*.npz             # full 8091-image embeddings (~91 MB)
 onnx/                        # ONNX exports, unused at runtime
 my_finetuned_clip.pt         # full checkpoint, unused at runtime
 
+# HuggingFace model cache — populated at runtime by download_models.py.
+# On Streamlit Cloud the cache may not persist between cold starts, so the
+# app re-downloads on each fresh boot (~30-60 s, shown to the user with a
+# clear "Preparing models…" status widget).
+hf_cache/
+
 # Lightweight fine-tuned heads — DO commit (small, loaded at runtime)
 !light_clip_heads.pt
 !light_blip_heads.pt
