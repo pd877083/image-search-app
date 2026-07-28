@@ -591,40 +591,45 @@ with tab_models:
 
     # ── Heavy-model load with graceful RAM fallback ──────────────────────────
     # BLIP (ViT-L/14 ~0.9 GB) + ALIGN (ViT-H/14 ~3.9 GB) together exceed the
-    # 1 GB RAM of Streamlit Community Cloud's free tier. Worse: when they
-    # OOM, the Linux kernel kills the process BEFORE Python can raise a
-    # catchable MemoryError, and `psutil.virtual_memory().available` reports
-    # *physical* RAM (not the cgroup limit) so any "auto-detect > 2 GB" check
-    # is unreliable on Cloud.
-    #
-    # Decision: **default to skipping the heavy load entirely.** The user has
-    # to explicitly opt in with `TRY_HEAVY_MODELS=1` (e.g. for a local 8 GB+
-    # demo). On the cloud deploy this means:
-    #   * no 2.5 GB BLIP/ALIGN download
-    #   * no OOM during the load
-    #   * the comparison tab still works — it falls back to the precomputed
-    #     gallery embeddings (BLIP & ALIGN columns) with CLIP-only live query
-    #     encoding, and the Precision@K chart at the bottom of the page shows
-    #     the full three-model offline numbers.
+    # 1 GB RAM of Streamlit Community Cloud's free tier. On a local box
+    # with 8 GB+ RAM they fit comfortably. We detect which environment we're
+    # in and pick a sensible default.
     blip_model = align_model = None
     comparison_models_ok = False  # default: no live BLIP/ALIGN encoding
     blip_status_msg = None
     align_status_msg = None
 
-    try_heavy = os.environ.get("TRY_HEAVY_MODELS", "0").lower()
-    try_heavy_bool = try_heavy in ("1", "true", "yes", "on")
+    # Streamlit Cloud mounts the repo at /mount/src/ — a reliable signal
+    # we're in the sandboxed 1 GB environment. On local dev that path
+    # doesn't exist.
+    _IS_CLOUD = os.path.isdir("/mount/src")
+
+    _try_heavy_env = os.environ.get("TRY_HEAVY_MODELS", "").strip().lower()
+    if _try_heavy_env in ("1", "true", "yes", "on"):
+        try_heavy_bool = True
+    elif _try_heavy_env in ("0", "false", "no", "off"):
+        try_heavy_bool = False
+    else:
+        # No explicit override: default to LOADING on local, SKIPPING on Cloud.
+        try_heavy_bool = not _IS_CLOUD
 
     if not try_heavy_bool:
-        st.info(
-            "ℹ️ **Cloud mode** — BLIP/ALIGN live encoding is disabled to stay "
-            "under the 1 GB sandbox limit. The comparison below still shows "
-            "BLIP/ALIGN results using the *precomputed* gallery embeddings "
-            "with a CLIP-encoded query (the same offline-evaluated setup used "
-            "to produce the Precision@K chart at the bottom of the page). "
-            "To run all three models live, set `TRY_HEAVY_MODELS=1` and run "
-            "locally on 8 GB+ RAM.",
-            icon="ℹ️",
-        )
+        if _IS_CLOUD:
+            st.info(
+                "ℹ️ **Cloud mode** — BLIP/ALIGN live encoding is disabled to stay "
+                "under the 1 GB sandbox limit. The comparison below still shows "
+                "BLIP/ALIGN results using the *precomputed* gallery embeddings. "
+                "To run all three models live, set `TRY_HEAVY_MODELS=1` and run "
+                "locally on 8 GB+ RAM.",
+                icon="ℹ️",
+            )
+        else:
+            st.info(
+                "ℹ️ BLIP/ALIGN live encoding is disabled. Set "
+                "`TRY_HEAVY_MODELS=1` in your environment to enable it on "
+                "this machine (needs ~3 GB free RAM).",
+                icon="ℹ️",
+            )
     else:
         # Opt-in path: pre-download + load. Surfaces a clear error if the host
         # can't handle it. This is the only place BLIP/ALIGN are touched.
