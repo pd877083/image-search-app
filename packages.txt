@@ -1,5 +1,2 @@
-# Optional system apt packages for Streamlit Cloud (Debian-based).
-# Streamlit installs these before pip install. Mostly harmless if unused.
-# libgl1 / libglib2.0-0 — sometimes required by Pillow & image libs on headless Linux.
 libgl1
 libglib2.0-0
