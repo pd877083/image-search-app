@@ -9,12 +9,11 @@ Model mapping:
 """
 
 import os
-from pathlib import Path
 
-# Redirect HF cache BEFORE importing open_clip — same rationale as model.py.
-_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
-_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
-os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+# NOTE: do NOT override HF_HOME here — see model.py for the rationale. The
+# default cache location (~/.cache/huggingface/) is correct for both local
+# and Cloud; download_models.py populates it at app startup so the first
+# request doesn't pay the download cost.
 
 # CPU memory is the bottleneck on Streamlit Cloud (1 GB). For ViT-L/14
 # (~890 MB) and ViT-H/14 (~2.5 GB) float32 weights easily OOM the sandbox,

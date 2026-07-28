@@ -40,16 +40,12 @@ import time
 import shutil
 from pathlib import Path
 
-# Project-local cache so the deployed app never re-downloads.
-# Path is resolved relative to this file so it works regardless of cwd.
-_HERE = Path(__file__).resolve().parent
-CACHE_DIR = _HERE / "hf_cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-# Tell huggingface_hub where to cache BEFORE we import it. Set unconditionally
-# (not setdefault) so a stray HF_HOME from the host env can't redirect our
-# downloads to a directory the deployed app can't read.
-os.environ["HF_HOME"] = str(CACHE_DIR)
+# Do NOT override HF_HOME — we want to use the default cache so:
+#   * Local dev picks up weights already at ~/.cache/huggingface/ (instant).
+#   * Streamlit Cloud populates ~/.cache/huggingface/ once and the same
+#     default location is read by open_clip via huggingface_hub.
+# If the user needs a project-local cache for some reason, they can set
+# HF_HOME themselves before running.
 
 # (repo_id, expected_file_substring) — only ViT-B/32 is required at startup;
 # BLIP/ALIGN are loaded lazily by the comparison tab so we still pre-download
@@ -81,13 +77,24 @@ def _hf_token() -> str | None:
 
 
 def _already_cached(repo_id: str, filename_substring: str) -> bool:
-    """Return True if the model weights are already present in the cache."""
-    if not CACHE_DIR.exists():
-        return False
+    """Return True if the model weights are already present in the default cache.
+
+    Checks both the modern and legacy HF cache layouts:
+      * ~/.cache/huggingface/hub/  (current default)
+      * ~/.cache/huggingface/       (older)
+    """
     needle = filename_substring.lower()
-    for path in CACHE_DIR.rglob("*"):
-        if path.is_file() and needle in path.name.lower():
-            return True
+    home = Path.home()
+    search_roots = [
+        home / ".cache" / "huggingface" / "hub",
+        home / ".cache" / "huggingface",
+    ]
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and needle in path.name.lower():
+                return True
     return False
 
 
@@ -111,12 +118,14 @@ def _download_with_retry(repo_id: str, filename_substring: str, max_attempts: in
     for attempt in range(1, max_attempts + 1):
         try:
             print(
-                f"[download_models] ({attempt}/{max_attempts}) {repo_id} -> {CACHE_DIR}",
+                f"[download_models] ({attempt}/{max_attempts}) {repo_id}",
                 flush=True,
             )
+            # No `cache_dir=` — use the default location so open_clip's
+            # later lookup hits the same path. huggingface_hub respects
+            # HF_HOME / HF_HUB_CACHE if set, else ~/.cache/huggingface/hub.
             snapshot_download(
                 repo_id=repo_id,
-                cache_dir=str(CACHE_DIR),
                 allow_patterns=[f"*{filename_substring}*", "*.json", "*.txt"],
                 token=token,
             )
@@ -147,7 +156,7 @@ def _download_with_retry(repo_id: str, filename_substring: str, max_attempts: in
 def ensure_models(include_optional: bool = False, progress_cb=None) -> dict:
     """
     Make sure all required (and optionally the comparison-tab) model weights
-    are present in the local cache.
+    are present in the default cache.
 
     Args:
         include_optional: also pre-download BLIP/ALIGN (use this when the
@@ -176,13 +185,13 @@ def ensure_models(include_optional: bool = False, progress_cb=None) -> dict:
             _report(repo_id, "cached", "already on disk")
             results[repo_id] = "cached"
             continue
-        _report(repo_id, "downloading", f"~{_approx_size_mb(repo_id)} MB to {CACHE_DIR.name}/")
+        _report(repo_id, "downloading", f"~{_approx_size_mb(repo_id)} MB")
         try:
             _download_with_retry(repo_id, filename)
         except Exception as exc:
             _report(repo_id, "error", str(exc))
             raise
-        _report(repo_id, "ready", str(CACHE_DIR / "hub"))
+        _report(repo_id, "ready", "")
         results[repo_id] = "downloaded"
     return results
 
@@ -203,11 +212,13 @@ def _approx_size_mb(repo_id: str) -> int:
 
 def _cli():
     include_opt = "--all" in sys.argv
-    print(f"[download_models] cache = {CACHE_DIR}")
+    print("[download_models] using default cache (~/.cache/huggingface/)")
     print(f"[download_models] include_optional = {include_opt}")
     ensure_models(include_optional=include_opt)
-    size_mb = sum(p.stat().st_size for p in CACHE_DIR.rglob("*") if p.is_file()) / (1024 * 1024)
-    print(f"[download_models] ✓ done. cache size = {size_mb:.0f} MB")
+    home = Path.home() / ".cache" / "huggingface"
+    if home.exists():
+        size_mb = sum(p.stat().st_size for p in home.rglob("*") if p.is_file()) / (1024 * 1024)
+        print(f"[download_models] ✓ done. cache size = {size_mb:.0f} MB")
 
 
 if __name__ == "__main__":

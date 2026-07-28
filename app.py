@@ -3,21 +3,16 @@ app.py — Semantic Image Search · Streamlit UI
 """
 
 import os
-from pathlib import Path
 
-# ── HuggingFace cache redirection (BEFORE any HF/open_clip import) ──────────
-# On Streamlit Cloud the default HF cache lives outside the project tree, so
-# the CLIP weights would be re-fetched on every cold start. download_models.py
-# populates ./hf_cache/ at startup; point HF_HOME there so the subsequent
-# open_clip.create_model_and_transforms(...) call is offline-safe.
+# NOTE: do NOT override HF_HOME here. On local dev the user already has the
+# CLIP weights at ~/.cache/huggingface/ (downloaded during local training) —
+# pointing HF_HOME at a project-local directory would force a re-download
+# and waste minutes. On Streamlit Cloud huggingface_hub writes to the user's
+# home cache by default; that's also fine (the pre-flight download below
+# populates it at startup so the first user request is fast).
 #
-# Note: we set HF_HOME UNCONDITIONALLY (not setdefault) because the directory
-# is created later by download_models.py. huggingface_hub will auto-create
-# the parent dirs as needed, so the env var is safe to set even if the cache
-# hasn't been populated yet.
-_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
-_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
-os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+# If you ever need to force a project-local cache, set HF_CACHE_DIR (the
+# modern env var huggingface_hub reads) explicitly before running.
 
 import io
 import time
@@ -52,34 +47,47 @@ st.set_page_config(
 # HuggingFace. Doing it here (with a visible status widget + retry logic)
 # turns a silent OOM/network-kill into a clear, recoverable error for the
 # user. Idempotent — a warm cache skips straight to "ready".
-import download_models  # noqa: E402  (after HF_HOME redirect above)
+#
+# BUT: if the user already has the full fine-tuned checkpoint locally
+# (my_finetuned_clip.pt), we're about to overwrite all weights anyway and
+# the openai download is pure waste. Worse, the local HF cache may contain
+# a stale/wrong file (e.g. the fine-tuned .pt placed under the openai repo
+# path) that confuses huggingface_hub and hangs the download. Skip entirely
+# in that case.
+import download_models  # noqa: E402
 
-with st.status("Preparing models (one-time, ~150 MB on first run) ...", expanded=True) as status_box:
-    def _on_progress(repo_id, stage, detail):
-        if stage == "cached":
-            status_box.write(f"✅ {repo_id} — already cached")
-        elif stage == "downloading":
-            status_box.write(f"⬇️ {repo_id} — {detail}")
-        elif stage == "ready":
-            status_box.write(f"✅ {repo_id} — ready")
-        elif stage == "error":
-            status_box.write(f"❌ {repo_id} — {detail}")
+_SKIP_DOWNLOAD = os.path.isfile("my_finetuned_clip.pt")
 
-    try:
-        download_models.ensure_models(include_optional=False, progress_cb=_on_progress)
-        status_box.update(label="Models ready ✓", state="complete")
-    except Exception as exc:
-        status_box.update(label="Model download failed", state="error")
-        st.error(
-            f"**Couldn't fetch the CLIP model from HuggingFace.**\n\n"
-            f"`{type(exc).__name__}: {exc}`\n\n"
-            f"This is usually one of:\n"
-            f"- A transient HuggingFace rate-limit — try **Reboot app** in the\n"
-            f"  Streamlit Cloud menu (top-right).\n"
-            f"- A blocked egress from the cloud sandbox — check that\n"
-            f"  `huggingface.co` is reachable.\n\n"
-            f"For higher rate limits, add a free `HF_TOKEN` to your app's\n"
-            f"**Secrets** (https://huggingface.co/settings/tokens)."
+if _SKIP_DOWNLOAD:
+    # Local dev with full fine-tuned weights on disk — no download needed.
+    st.toast("✅ Found my_finetuned_clip.pt — using local fine-tuned weights, skipping HuggingFace download.", icon="✅")
+else:
+    with st.status("Preparing models (one-time, ~150 MB on first run) ...", expanded=True) as status_box:
+        def _on_progress(repo_id, stage, detail):
+            if stage == "cached":
+                status_box.write(f"✅ {repo_id} — already cached")
+            elif stage == "downloading":
+                status_box.write(f"⬇️ {repo_id} — {detail}")
+            elif stage == "ready":
+                status_box.write(f"✅ {repo_id} — ready")
+            elif stage == "error":
+                status_box.write(f"❌ {repo_id} — {detail}")
+
+        try:
+            download_models.ensure_models(include_optional=False, progress_cb=_on_progress)
+            status_box.update(label="Models ready ✓", state="complete")
+        except Exception as exc:
+            status_box.update(label="Model download failed", state="error")
+            st.error(
+                f"**Couldn't fetch the CLIP model from HuggingFace.**\n\n"
+                f"`{type(exc).__name__}: {exc}`\n\n"
+                f"This is usually one of:\n"
+                f"- A transient HuggingFace rate-limit — try **Reboot app** in the\n"
+                f"  Streamlit Cloud menu (top-right).\n"
+                f"- A blocked egress from the cloud sandbox — check that\n"
+                f"  `huggingface.co` is reachable.\n\n"
+                f"For higher rate limits, add a free `HF_TOKEN` to your app's\n"
+                f"**Secrets** (https://huggingface.co/settings/tokens)."
         )
         st.stop()
 
@@ -155,8 +163,19 @@ def resolve_image_path(path: str) -> str:
 def load_model():
     import torch
     import os
-    # 1. Base model normal load hoga (System RAM/CPU par)
-    model, preprocess = load_clip_model("ViT-B/32")
+    # 1. Base model architecture. If the full fine-tuned checkpoint is on
+    # disk, skip the 150 MB openai download — we're about to overwrite
+    # every weight anyway, and the local HF cache may already contain a
+    # stale/wrong file (e.g. the fine-tuned .pt accidentally placed
+    # under the openai repo's snapshot dir) that would otherwise be
+    # loaded and break the forward pass.
+    full_checkpoint = "my_finetuned_clip.pt"
+    light_checkpoint = "light_clip_heads.pt"
+    if os.path.exists(full_checkpoint):
+        print(f"[load_model] Skipping openai download — {full_checkpoint} will replace all weights.")
+        model, preprocess = load_clip_model("ViT-B/32", pretrained=None)
+    else:
+        model, preprocess = load_clip_model("ViT-B/32", pretrained="openai")
 
     # 2. Query encoder MUST match the checkpoint the gallery embeddings were
     # built with (build_embeddings.py uses my_finetuned_clip.pt), otherwise
@@ -164,8 +183,6 @@ def load_model():
     # tab degrades. Prefer the full checkpoint locally; fall back to the
     # lightweight Kaggle heads on the cloud deploy where the 577 MB file
     # isn't committed.
-    full_checkpoint = "my_finetuned_clip.pt"
-    light_checkpoint = "light_clip_heads.pt"
     if os.path.exists(full_checkpoint):
         print(f"Loading fine-tuned CLIP weights from {full_checkpoint}...")
         state_dict = torch.load(full_checkpoint, map_location='cpu', weights_only=True)

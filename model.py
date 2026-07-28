@@ -6,17 +6,11 @@ and encoding both images and text into the shared embedding space.
 """
 
 import os
-from pathlib import Path
 
-# ── HuggingFace cache redirection (must happen BEFORE importing open_clip) ─
-# On Streamlit Cloud the default cache lives outside the project (and outside
-# the persistent disk in some cases), so the 150 MB CLIP download would be
-# re-fetched on every cold start. Point HF_HOME at a project-local directory
-# that download_models.py populates. We set it unconditionally because
-# huggingface_hub will create the directory on demand.
-_LOCAL_HF_CACHE = Path(__file__).resolve().parent / "hf_cache"
-_LOCAL_HF_CACHE.mkdir(parents=True, exist_ok=True)
-os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+# NOTE: do NOT override HF_HOME here. On local dev the user already has the
+# CLIP weights at ~/.cache/huggingface/ — overriding HF_HOME would force a
+# re-download. On Cloud the default cache works fine and download_models.py
+# (called from app.py) pre-populates it at startup.
 
 # FP16 halves RAM at load time — critical for the 1 GB Streamlit Cloud
 # sandbox. Toggle via env var if you need FP32 for exact numerics.
@@ -49,14 +43,20 @@ def _to_open_clip_name(model_name: str) -> str:
     return model_name.replace("/", "-")
 
 
-def load_clip_model(model_name: str = "ViT-B/32"):
+def load_clip_model(model_name: str = "ViT-B/32", pretrained: str | bool | None = "openai"):
     """
-    Load the pretrained CLIP model and its preprocessing pipeline via OpenCLIP.
+    Load the CLIP model architecture (and optionally its pretrained weights)
+    via OpenCLIP.
 
     Args:
         model_name: CLIP variant to use. 'ViT-B/32' (or 'ViT-B-32') is the
                     fastest and runs comfortably on CPU with 8 GB RAM.
                     Other options: 'ViT-B/16', 'RN50', 'RN101'.
+        pretrained: Which weights to download. Defaults to "openai".
+                    Pass None to skip the download entirely — useful when
+                    you're about to overwrite all weights from a local
+                    fine-tuned checkpoint (saves ~150 MB and avoids the
+                    "wrong file already in the HF cache" trap).
 
     Returns:
         model      : The CLIP model (in eval mode, no gradients needed).
@@ -66,7 +66,7 @@ def load_clip_model(model_name: str = "ViT-B/32"):
     global _tokenizer
 
     open_clip_name = _to_open_clip_name(model_name)
-    print(f"[CLIP] Loading model '{open_clip_name}' (openai) on {DEVICE} …")
+    print(f"[CLIP] Loading model '{open_clip_name}' (pretrained={pretrained}) on {DEVICE} …")
 
     # force_quick_gelu=True matches OpenAI CLIP weights (needed on open_clip ≥3.x)
     # precision='fp16' halves RAM at load (≈600 MB → ≈300 MB for ViT-B/32) which
@@ -75,7 +75,7 @@ def load_clip_model(model_name: str = "ViT-B/32"):
     try:
         model, _, preprocess = open_clip.create_model_and_transforms(
             open_clip_name,
-            pretrained="openai",
+            pretrained=pretrained,
             force_quick_gelu=True,
             precision="fp16" if USE_FP16 else "fp32",
         )
@@ -83,7 +83,7 @@ def load_clip_model(model_name: str = "ViT-B/32"):
         # Older open_clip versions don't accept `precision=` — fall back to
         # the legacy kwarg path, then cast to half manually if requested.
         model, _, preprocess = open_clip.create_model_and_transforms(
-            open_clip_name, pretrained="openai", force_quick_gelu=True
+            open_clip_name, pretrained=pretrained, force_quick_gelu=True
         )
         if USE_FP16:
             model = model.half()
@@ -94,6 +94,8 @@ def load_clip_model(model_name: str = "ViT-B/32"):
 
     model = model.to(DEVICE)
     model.eval()          # inference-only — disables dropout / batch-norm updates
+    # Even when pretrained=None we still want the tokenizer (it's just
+    # BPE-vocab, no weights, instant to construct).
     _tokenizer = open_clip.get_tokenizer(open_clip_name)
 
     print("[CLIP] Model loaded successfully.")
