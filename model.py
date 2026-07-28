@@ -139,7 +139,8 @@ def encode_images(image_paths: list, model, preprocess, batch_size: int = 32) ->
         # Stack into a tensor batch: shape → (B, 3, 224, 224)
         image_tensor = torch.stack(images).to(DEVICE)
         # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        model_dtype = next(model.parameters()).dtype
+        # See _infer_visual_dtype for why we don't use next(parameters()).
+        model_dtype = _infer_visual_dtype(model)
         image_tensor = image_tensor.to(dtype=model_dtype)
 
         with torch.no_grad():                            # no gradient tracking needed
@@ -178,7 +179,8 @@ def encode_texts(captions: list, model, batch_size: int = 256) -> np.ndarray:
         # OpenCLIP tokenizer truncates captions longer than 77 tokens
         tokens = _tokenizer(batch_captions).to(DEVICE)
         # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        model_dtype = next(model.parameters()).dtype
+        # See _infer_visual_dtype for why we don't use next(parameters()).
+        model_dtype = _infer_visual_dtype(model)
         tokens = tokens.to(dtype=model_dtype)
 
         with torch.no_grad():
@@ -208,10 +210,11 @@ def encode_single_image(image: Image.Image, model, preprocess) -> np.ndarray:
         embedding  : Float32 NumPy array of shape (1, 512).
     """
     image_tensor = preprocess(image.convert("RGB")).unsqueeze(0).to(DEVICE)
-    # Cast the input to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-    # Without this, model.encode_image() raises a "Input type (torch.FloatTensor)
-    # and weight type (torch.HalfTensor) should be the same" RuntimeError.
-    model_dtype = next(model.parameters()).dtype
+    # Cast the input to the model's dtype. Look at the FIRST conv weight
+    # specifically — `next(model.parameters())` can return a fp32 scalar
+    # like `logit_scale` even when the rest of the model is fp16, which
+    # then causes the conv forward pass to see a dtype mismatch.
+    model_dtype = _infer_visual_dtype(model)
     image_tensor = image_tensor.to(dtype=model_dtype)
 
     with torch.no_grad():
@@ -237,7 +240,7 @@ def encode_single_text(query: str, model) -> np.ndarray:
 
     tokens = _tokenizer([query]).to(DEVICE)
     # Cast the token tensor to the model's dtype (same reason as encode_single_image).
-    model_dtype = next(model.parameters()).dtype
+    model_dtype = _infer_visual_dtype(model)
     tokens = tokens.to(dtype=model_dtype)
 
     with torch.no_grad():
@@ -248,6 +251,21 @@ def encode_single_text(query: str, model) -> np.ndarray:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _infer_visual_dtype(model) -> torch.dtype:
+    """Return the dtype of the visual encoder's first conv weight.
+
+    The naive `next(model.parameters()).dtype` is unreliable: open_clip keeps
+    a fp32 `logit_scale` scalar as a parameter, which can be iterated first
+    even when the rest of the model is fp16. The conv1 weight is the actual
+    layer that takes image input, so its dtype is the one the input must match.
+    """
+    try:
+        return model.visual.conv1.weight.dtype
+    except AttributeError:
+        # Fall back to the first parameter if conv1 isn't where we expect.
+        return next(model.parameters()).dtype
+
 
 def _l2_normalise(vectors: np.ndarray) -> np.ndarray:
     """

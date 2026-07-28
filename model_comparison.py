@@ -103,7 +103,8 @@ def encode_images_model(image_paths, model, preprocess, batch_size=16, label="MO
             continue
         tensor = torch.stack(images).to(DEVICE)
         # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        model_dtype = next(model.parameters()).dtype
+        # See _infer_visual_dtype for why we don't use next(parameters()).
+        model_dtype = _infer_visual_dtype(model)
         tensor = tensor.to(dtype=model_dtype)
         with torch.no_grad():
             emb = model.encode_image(tensor)
@@ -119,7 +120,8 @@ def encode_texts_model(captions, model, tokenizer, batch_size=128, label="MODEL"
         batch = captions[start:start + batch_size]
         tokens = tokenizer(batch).to(DEVICE)
         # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        model_dtype = next(model.parameters()).dtype
+        # See _infer_visual_dtype for why we don't use next(parameters()).
+        model_dtype = _infer_visual_dtype(model)
         tokens = tokens.to(dtype=model_dtype)
         with torch.no_grad():
             emb = model.encode_text(tokens)
@@ -131,10 +133,21 @@ def encode_texts_model(captions, model, tokenizer, batch_size=128, label="MODEL"
 
 #  Single query encoders 
 
+def _infer_visual_dtype(model):
+    """Return the dtype of the visual encoder's first conv weight.
+
+    Same rationale as model.py — see that file for the long comment.
+    """
+    try:
+        return model.visual.conv1.weight.dtype
+    except AttributeError:
+        return next(model.parameters()).dtype
+
+
 def encode_single_image_model(image, model, preprocess):
     tensor = preprocess(image.convert("RGB")).unsqueeze(0).to(DEVICE)
     # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-    model_dtype = next(model.parameters()).dtype
+    model_dtype = _infer_visual_dtype(model)
     tensor = tensor.to(dtype=model_dtype)
     with torch.no_grad():
         emb = model.encode_image(tensor)
@@ -144,7 +157,7 @@ def encode_single_image_model(image, model, preprocess):
 def encode_single_text_model(query, model, tokenizer):
     tokens = tokenizer([query]).to(DEVICE)
     # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-    model_dtype = next(model.parameters()).dtype
+    model_dtype = _infer_visual_dtype(model)
     tokens = tokens.to(dtype=model_dtype)
     with torch.no_grad():
         emb = model.encode_text(tokens)
