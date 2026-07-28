@@ -471,7 +471,7 @@ with tab_text:
             with col:
                 rp = resolve_image_path(result.image_path)
                 if os.path.isfile(rp):
-                    st.image(Image.open(rp).convert("RGB"), use_column_width=True)
+                    st.image(Image.open(rp).convert("RGB"), width="stretch")
                     st.markdown(score_bar(result.score), unsafe_allow_html=True)
 
 # ── TAB 2 — Image to Caption ──────────────────────────────────────────────────
@@ -489,7 +489,7 @@ with tab_image:
         query_image = Image.open(io.BytesIO(uploaded_file.read())).convert("RGB")
         c_prev, c_spacer = st.columns([1.5, 4])
         with c_prev:
-            st.image(query_image, caption="Query image", use_column_width=True)
+            st.image(query_image, caption="Query image", width="stretch")
         if st.button("Find Captions", key="search_image"):
             with st.spinner("Searching ..."):
                 img_query_embedding = encode_single_image(query_image, model, preprocess)
@@ -921,7 +921,7 @@ with tab_i2i:
         i2i_query = Image.open(io.BytesIO(i2i_file.read())).convert("RGB")
         c_prev_i2i, _ = st.columns([1.5, 4])
         with c_prev_i2i:
-            st.image(i2i_query, caption="Query image", use_column_width=True)
+            st.image(i2i_query, caption="Query image", width="stretch")
 
         if st.button("Find Similar Images", key="search_i2i"):
             with st.spinner("Encoding query & searching gallery ..."):
@@ -940,7 +940,7 @@ with tab_i2i:
                     if os.path.isfile(rp):
                         st.image(
                             Image.open(rp).convert("RGB"),
-                            use_column_width=True,
+                            width="stretch",
                         )
                     st.markdown(score_bar(result.score), unsafe_allow_html=True)
 
