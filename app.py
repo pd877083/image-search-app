@@ -574,51 +574,43 @@ with tab_models:
 
     # ── Heavy-model load with graceful RAM fallback ──────────────────────────
     # BLIP (ViT-L/14 ~0.9 GB) + ALIGN (ViT-H/14 ~3.9 GB) together exceed the
-    # 1 GB RAM of Streamlit Community Cloud's free tier. If we OOM, the
-    # Linux OOM killer terminates the process silently — no Python exception
-    # is raised, so a plain try/except can't catch it.
+    # 1 GB RAM of Streamlit Community Cloud's free tier. Worse: when they
+    # OOM, the Linux kernel kills the process BEFORE Python can raise a
+    # catchable MemoryError, and `psutil.virtual_memory().available` reports
+    # *physical* RAM (not the cgroup limit) so any "auto-detect > 2 GB" check
+    # is unreliable on Cloud.
     #
-    # The fix: cap RLIMIT_AS (virtual address space) BEFORE the load, so the
-    # over-allocation surfaces as a catchable MemoryError instead of a kill.
-    # We try BLIP first (smaller); if it fits, we attempt ALIGN. If ALIGN
-    # OOMs we still keep BLIP alive for the two-way comparison.
+    # Decision: **default to skipping the heavy load entirely.** The user has
+    # to explicitly opt in with `TRY_HEAVY_MODELS=1` (e.g. for a local 8 GB+
+    # demo). On the cloud deploy this means:
+    #   * no 2.5 GB BLIP/ALIGN download
+    #   * no OOM during the load
+    #   * the comparison tab still works — it falls back to the precomputed
+    #     gallery embeddings (BLIP & ALIGN columns) with CLIP-only live query
+    #     encoding, and the Precision@K chart at the bottom of the page shows
+    #     the full three-model offline numbers.
     blip_model = align_model = None
-    comparison_models_ok = True
+    comparison_models_ok = False  # default: no live BLIP/ALIGN encoding
     blip_status_msg = None
     align_status_msg = None
 
-    # Only attempt the heavy load on environments with ≥ 2 GB free RAM. On
-    # Streamlit Cloud Community we get 1 GB total; CLIs can opt in with
-    # TRY_HEAVY_MODELS=1 (e.g. for the user's local demo).
-    try:
-        import psutil  # type: ignore
-        free_gb = psutil.virtual_memory().available / (1024 ** 3)
-    except Exception:
-        # psutil is in requirements.txt but be defensive in case the import
-        # is shadowed / stripped: fall back to the env-var override.
-        free_gb = 0.0
-    try_heavy = os.environ.get("TRY_HEAVY_MODELS", "auto").lower()
-    if try_heavy == "1":
-        try_heavy_bool = True
-    elif try_heavy == "0":
-        try_heavy_bool = False
-    else:
-        # Auto: only attempt if at least 2 GB free (Streamlit Community has 1 GB).
-        try_heavy_bool = free_gb >= 2.0
+    try_heavy = os.environ.get("TRY_HEAVY_MODELS", "0").lower()
+    try_heavy_bool = try_heavy in ("1", "true", "yes", "on")
 
     if not try_heavy_bool:
-        comparison_models_ok = False
-        blip_status_msg = (
-            f"ℹ️ BLIP/ALIGN skipped automatically — this environment has "
-            f"{free_gb:.1f} GB free RAM. The free Streamlit Community tier "
-            f"has 1 GB; these two models need ~5 GB combined. **CLIP results "
-            f"still work**, and the precomputed Precision@K chart at the bottom "
-            f"of the page shows the full comparison. Run locally (8 GB+ RAM) "
-            f"or set `TRY_HEAVY_MODELS=1` to override."
+        st.info(
+            "ℹ️ **Cloud mode** — BLIP/ALIGN live encoding is disabled to stay "
+            "under the 1 GB sandbox limit. The comparison below still shows "
+            "BLIP/ALIGN results using the *precomputed* gallery embeddings "
+            "with a CLIP-encoded query (the same offline-evaluated setup used "
+            "to produce the Precision@K chart at the bottom of the page). "
+            "To run all three models live, set `TRY_HEAVY_MODELS=1` and run "
+            "locally on 8 GB+ RAM.",
+            icon="ℹ️",
         )
-        st.info(blip_status_msg, icon="ℹ️")
     else:
-        # Pre-download BLIP/ALIGN weights (cached on subsequent visits).
+        # Opt-in path: pre-download + load. Surfaces a clear error if the host
+        # can't handle it. This is the only place BLIP/ALIGN are touched.
         with st.status("Preparing BLIP & ALIGN weights ...", expanded=False) as opt_status:
             def _on_progress_opt(repo_id, stage, detail):
                 if stage == "cached":
@@ -632,21 +624,23 @@ with tab_models:
             try:
                 download_models.ensure_models(include_optional=True, progress_cb=_on_progress_opt)
                 opt_status.update(label="BLIP & ALIGN weights ready ✓", state="complete")
+                comparison_models_ok = True
             except Exception as exc:
                 opt_status.update(label="Could not pre-cache BLIP/ALIGN", state="error")
-                blip_status_msg = (
-                    f"⚠️ Could not pre-cache BLIP/ALIGN weights ({type(exc).__name__}). "
-                    "The comparison tab will only show CLIP results."
+                st.warning(
+                    f"⚠️ Could not pre-cache BLIP/ALIGN weights "
+                    f"({type(exc).__name__}: {exc}). The comparison tab will "
+                    f"only show CLIP results."
                 )
-                st.warning(blip_status_msg)
                 comparison_models_ok = False
 
         if comparison_models_ok:
-            # Load BLIP first (smaller). Cap virtual address space so
-            # over-allocation raises a catchable MemoryError instead of
-            # triggering the OOM killer. RLIMIT_AS only exists on Linux,
-            # which is fine — Streamlit Cloud is Linux. On other platforms
-            # we just run the loader directly and rely on the try/except.
+            # Load BLIP first. Wrap each load in its own try/except so a
+            # failure on one model doesn't leave the other half-initialised.
+            # The Linux OOM killer can still bypass this when the over-
+            # allocation happens entirely in C (PyTorch's allocator), but
+            # capping RLIMIT_AS first means most failures show up as a
+            # catchable MemoryError before the kernel steps in.
             try:
                 import resource  # type: ignore  # POSIX-only
                 _HAS_RESOURCE = True
@@ -674,6 +668,29 @@ with tab_models:
                             resource.setrlimit(resource.RLIMIT_AS, (old_soft, old_hard))
                         except (ValueError, OSError):
                             pass
+
+            with st.spinner("Loading BLIP model ..."):
+                result = _cap_rss_and_load(load_blip, "BLIP", cap_mb=700)
+                if result[0] is not None:
+                    blip_model, blip_preprocess, blip_tokenizer = result[0]
+                else:
+                    st.warning(
+                        f"⚠️ BLIP failed to load ({result[1]}). "
+                        "ALIGN is even larger so it's being skipped too. "
+                        "**CLIP results still work** below."
+                    )
+                    comparison_models_ok = False
+
+            if blip_model is not None:
+                with st.spinner("Loading ALIGN model ..."):
+                    result = _cap_rss_and_load(load_align, "ALIGN", cap_mb=950)
+                    if result[0] is not None:
+                        align_model, align_preprocess, align_tokenizer = result[0]
+                    else:
+                        st.warning(
+                            f"⚠️ ALIGN failed to load ({result[1]}). "
+                            "**CLIP and BLIP results still work** below."
+                        )
 
             with st.spinner("Loading BLIP model ..."):
                 result = _cap_rss_and_load(load_blip, "BLIP", cap_mb=700)
@@ -802,23 +819,46 @@ with tab_models:
             st.markdown("<div class='method-header blip-header'>🔴 BLIP — ViT-L/14</div>", unsafe_allow_html=True)
             st.markdown("<small style='color:#6b6884'>Salesforce · Larger model · Better detail understanding</small>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
-            for r in blip_results:
-                rp = resolve_image_path(r.image_path)
-                if os.path.isfile(rp):
-                    st.image(Image.open(rp).convert("RGB"), width=190)
-                    st.markdown(score_bar(r.score, "#ff6464"), unsafe_allow_html=True)
-                    st.markdown("<br>", unsafe_allow_html=True)
+            if blip_results:
+                for r in blip_results:
+                    rp = resolve_image_path(r.image_path)
+                    if os.path.isfile(rp):
+                        st.image(Image.open(rp).convert("RGB"), width=190)
+                        st.markdown(score_bar(r.score, "#ff6464"), unsafe_allow_html=True)
+                        st.markdown("<br>", unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    "<div class='info-box' style='font-size:0.8rem; padding:0.8rem;'>"
+                    "⏭ <strong>BLIP skipped on this deploy</strong> — the ViT-L/14 "
+                    "backbone (~900 MB) plus the running CLIP model exceed the 1 GB "
+                    "Streamlit Cloud sandbox. See the Precision@K chart at the "
+                    "bottom of the page for the offline three-model numbers, or "
+                    "run locally with `TRY_HEAVY_MODELS=1`."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
         with col3:
             st.markdown("<div class='method-header align-header'>🔵 ALIGN — ViT-H/14</div>", unsafe_allow_html=True)
             st.markdown("<small style='color:#6b6884'>Google · 1.8B image-text pairs · Largest scale training</small>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
-            for r in align_results:
-                rp = resolve_image_path(r.image_path)
-                if os.path.isfile(rp):
-                    st.image(Image.open(rp).convert("RGB"), width=190)
-                    st.markdown(score_bar(r.score, "#00b4ff"), unsafe_allow_html=True)
-                    st.markdown("<br>", unsafe_allow_html=True)
+            if align_results:
+                for r in align_results:
+                    rp = resolve_image_path(r.image_path)
+                    if os.path.isfile(rp):
+                        st.image(Image.open(rp).convert("RGB"), width=190)
+                        st.markdown(score_bar(r.score, "#00b4ff"), unsafe_allow_html=True)
+                        st.markdown("<br>", unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    "<div class='info-box' style='font-size:0.8rem; padding:0.8rem;'>"
+                    "⏭ <strong>ALIGN skipped on this deploy</strong> — the ViT-H/14 "
+                    "backbone (~2.5 GB) is the largest of the three. See the "
+                    "Precision@K chart at the bottom of the page for the offline "
+                    "three-model numbers, or run locally with `TRY_HEAVY_MODELS=1`."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown("""

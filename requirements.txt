@@ -34,7 +34,6 @@ faiss-cpu==1.14.3
 # Frontend
 streamlit>=1.35
 plotly>=5.22            # Precision@K charts in the UI
-psutil>=5.9             # RAM probe in app.py — auto-skips BLIP/ALIGN load on <2 GB
 
 # Offline data-prep (download_data.py — CC3M sample via HuggingFace)
 datasets==4.8.5
