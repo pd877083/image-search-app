@@ -4,6 +4,8 @@ app.py — Semantic Image Search · Streamlit UI
 
 import os
 import io
+import time
+import importlib.util
 import numpy as np
 import streamlit as st
 from PIL import Image
@@ -103,18 +105,31 @@ def load_model():
     import os
     # 1. Base model normal load hoga (System RAM/CPU par)
     model, preprocess = load_clip_model("ViT-B/32")
-    
-    # 2. Kaggle se nikale lightweight weights overwrite honge
-    checkpoint_path = "light_clip_heads.pt"
-    if os.path.exists(checkpoint_path):
-        print(f"Loading lightweight fine-tuned CLIP weights from {checkpoint_path}...")
-        state_dict = torch.load(checkpoint_path, map_location='cpu')
+
+    # 2. Query encoder MUST match the checkpoint the gallery embeddings were
+    # built with (build_embeddings.py uses my_finetuned_clip.pt), otherwise
+    # query and gallery live in different embedding spaces and every retrieval
+    # tab degrades. Prefer the full checkpoint locally; fall back to the
+    # lightweight Kaggle heads on the cloud deploy where the 577 MB file
+    # isn't committed.
+    full_checkpoint = "my_finetuned_clip.pt"
+    light_checkpoint = "light_clip_heads.pt"
+    if os.path.exists(full_checkpoint):
+        print(f"Loading fine-tuned CLIP weights from {full_checkpoint}...")
+        state_dict = torch.load(full_checkpoint, map_location='cpu', weights_only=True)
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
+        print("Fine-tuned CLIP weights injected successfully!")
+    elif os.path.exists(light_checkpoint):
+        print(f"Loading lightweight fine-tuned CLIP weights from {light_checkpoint}...")
+        state_dict = torch.load(light_checkpoint, map_location='cpu', weights_only=True)
         # Srf projection heads badalne ke liye strict=False zaroori hai!
         model.load_state_dict(state_dict, strict=False)
         print("Lightweight CLIP weights injected successfully!")
     else:
-        print("⚠️ light_clip_heads.pt not found! Using default OpenAI weights.")
-        
+        print("⚠️ No fine-tuned checkpoint found! Using default OpenAI weights.")
+
     return model, preprocess
 
 @st.cache_resource(show_spinner=False)
@@ -188,6 +203,44 @@ def embeddings_ready():
 def comparison_embeddings_ready():
     return all(os.path.isfile(p) for p in [BLIP_IMG_PATH, BLIP_TXT_PATH, ALIGN_IMG_PATH, ALIGN_TXT_PATH])
 
+# ── ONNX Runtime text encoder (optional fast path) ───────────────────────────
+# onnxruntime is intentionally NOT in requirements.txt (cloud deploys skip it),
+# so it must NEVER be imported at module level. Everything below degrades
+# gracefully to the PyTorch path when onnxruntime or the onnx/ files are absent.
+ONNX_TEXT_FP32 = os.path.join("onnx", "clip_text.onnx")
+ONNX_TEXT_INT8 = os.path.join("onnx", "clip_int8.onnx")
+
+def onnx_text_available() -> bool:
+    """True only if onnxruntime is importable AND the FP32 text model exists.
+    Uses find_spec so we never actually import onnxruntime here."""
+    return (
+        importlib.util.find_spec("onnxruntime") is not None
+        and os.path.isfile(ONNX_TEXT_FP32)
+    )
+
+@st.cache_resource(show_spinner=False)
+def load_onnx_text_session(model_path: str):
+    import onnxruntime as ort   # lazy import — only reached when toggle is ON
+    return ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+
+@st.cache_resource(show_spinner=False)
+def load_onnx_tokenizer():
+    import open_clip
+    return open_clip.get_tokenizer("ViT-B-32")
+
+def encode_single_text_onnx(query: str, model_path: str) -> np.ndarray:
+    """Encode one text query via onnxruntime. Same contract as
+    encode_single_text(): returns an L2-normalised float32 (1, 512) array,
+    so retrieval scores are directly comparable with the PyTorch path."""
+    session = load_onnx_text_session(model_path)
+    tokenizer = load_onnx_tokenizer()
+    tokens = tokenizer([query]).numpy().astype(np.int64)
+    input_name = session.get_inputs()[0].name
+    embedding = session.run(None, {input_name: tokens})[0].astype(np.float32)
+    norms = np.linalg.norm(embedding, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1e-10, norms)
+    return embedding / norms
+
 def score_bar(score, color="#7c5fff"):
     pct = min(int(abs(score) * 100), 100)
     return f"""
@@ -204,6 +257,8 @@ if "query_text" not in st.session_state:
     st.session_state.query_text = ""
 if "model_history" not in st.session_state:
     st.session_state.model_history = []
+if "auto_search" not in st.session_state:
+    st.session_state.auto_search = False
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -257,7 +312,12 @@ with tab_text:
         for i, h in enumerate(st.session_state.search_history[:10]):
             with h_cols[i % 5]:
                 if st.button(h, key=f"hist_{i}"):
+                    # Fill the query box AND auto-run the search on the rerun.
+                    # Safe because query_text/auto_search are plain state keys
+                    # (not widget keys) set before their consumers instantiate.
                     st.session_state.query_text = h
+                    st.session_state.auto_search = True
+                    st.rerun()
 
     col_input, col_gap, col_k = st.columns([4, 0.3, 1.5])
     with col_input:
@@ -267,10 +327,57 @@ with tab_text:
         st.markdown("<div class='section-header'>Results</div>", unsafe_allow_html=True)
         top_k_text = st.slider("top_k_text", min_value=1, max_value=10, value=5, label_visibility="collapsed")
 
-    if st.button("Search Images", key="search_text") and text_query.strip():
+    # ── ⚡ ONNX mode toggle (sidebar is hidden by CSS, so it lives here) ──────
+    onnx_ok = onnx_text_available()
+    col_onnx, col_prec, _ = st.columns([1.4, 2.2, 2.4])
+    with col_onnx:
+        use_onnx = st.toggle(
+            "⚡ ONNX mode",
+            value=False,
+            disabled=not onnx_ok,
+            key="onnx_mode",
+            help="Encode the text query with ONNX Runtime instead of PyTorch (faster on CPU).",
+        )
+    with col_prec:
+        onnx_precision = "FP32"
+        if onnx_ok and use_onnx:
+            onnx_precision = st.radio(
+                "onnx_precision",
+                options=["FP32", "INT8"] if os.path.isfile(ONNX_TEXT_INT8) else ["FP32"],
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed",
+                key="onnx_precision",
+            )
+    if not onnx_ok:
+        st.info("⚡ ONNX mode unavailable (onnxruntime not installed or onnx/ models missing) — using PyTorch.", icon="ℹ️")
+
+    # auto_search is set by the Recent Searches buttons: consume it exactly once
+    # so a history click both fills the box and runs the search immediately.
+    auto_search = st.session_state.pop("auto_search", False)
+    if (st.button("Search Images", key="search_text") or auto_search) and text_query.strip():
         with st.spinner("Searching ..."):
-            query_embedding = encode_single_text(text_query.strip(), model)
+            encode_via = "PyTorch"
+            t0 = time.perf_counter()
+            if use_onnx and onnx_ok:
+                try:
+                    onnx_path = ONNX_TEXT_INT8 if onnx_precision == "INT8" else ONNX_TEXT_FP32
+                    # Warm the cached session/tokenizer first so the latency
+                    # readout measures pure encode time, not one-off model load.
+                    load_onnx_text_session(onnx_path)
+                    load_onnx_tokenizer()
+                    t0 = time.perf_counter()
+                    query_embedding = encode_single_text_onnx(text_query.strip(), onnx_path)
+                    encode_via = f"ONNX Runtime ({onnx_precision})"
+                except Exception as exc:
+                    st.warning(f"ONNX encoding failed ({type(exc).__name__}) — falling back to PyTorch.")
+                    t0 = time.perf_counter()
+                    query_embedding = encode_single_text(text_query.strip(), model)
+            else:
+                query_embedding = encode_single_text(text_query.strip(), model)
+            encode_ms = (time.perf_counter() - t0) * 1000.0
             results = text_to_image_search(query_embedding, img_embeddings, image_paths, top_k=top_k_text)
+        st.caption(f"Query encoded in {encode_ms:.1f} ms via {encode_via}")
         if text_query.strip() not in st.session_state.search_history:
             st.session_state.search_history.insert(0, text_query.strip())
         st.session_state.search_history = st.session_state.search_history[:10]
