@@ -42,3 +42,6 @@ embeddings/latency_chart.png
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Local scratch / test scripts ──────────────────────────────────────────────
+_scratch/
