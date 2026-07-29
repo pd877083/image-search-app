@@ -176,12 +176,11 @@ def encode_texts(captions: list, model, batch_size: int = 256) -> np.ndarray:
     for start in range(0, len(captions), batch_size):
         batch_captions = captions[start : start + batch_size]
 
-        # OpenCLIP tokenizer truncates captions longer than 77 tokens
+        # OpenCLIP tokenizer truncates captions longer than 77 tokens.
+        # Token IDs are integer indices — they MUST stay as Long for the
+        # embedding lookup. open_clip internally casts the *output* of the
+        # embedding table to the model's compute dtype.
         tokens = _tokenizer(batch_captions).to(DEVICE)
-        # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        # See _infer_visual_dtype for why we don't use next(parameters()).
-        model_dtype = _infer_visual_dtype(model)
-        tokens = tokens.to(dtype=model_dtype)
 
         with torch.no_grad():
             batch_embeddings = model.encode_text(tokens)
@@ -238,10 +237,13 @@ def encode_single_text(query: str, model) -> np.ndarray:
     if _tokenizer is None:
         raise RuntimeError("Call load_clip_model() before encode_single_text().")
 
+    # CRITICAL: token IDs are *integer indices* into the embedding table.
+    # The nn.Embedding layer requires a Long tensor — casting to fp16 raises
+    # "Expected scalar types: Long, Int; but got torch.HalfTensor" inside
+    # F.embedding. Don't touch the dtype here; open_clip's encode_text()
+    # itself casts the *output* of the embedding lookup to the model's
+    # compute dtype via .to(cast_dtype).
     tokens = _tokenizer([query]).to(DEVICE)
-    # Cast the token tensor to the model's dtype (same reason as encode_single_image).
-    model_dtype = _infer_visual_dtype(model)
-    tokens = tokens.to(dtype=model_dtype)
 
     with torch.no_grad():
         embedding = model.encode_text(tokens)

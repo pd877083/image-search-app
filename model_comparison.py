@@ -118,11 +118,9 @@ def encode_texts_model(captions, model, tokenizer, batch_size=128, label="MODEL"
     all_embeddings = []
     for start in range(0, len(captions), batch_size):
         batch = captions[start:start + batch_size]
+        # Token IDs are integer indices — they MUST stay as Long for the
+        # embedding lookup.
         tokens = tokenizer(batch).to(DEVICE)
-        # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-        # See _infer_visual_dtype for why we don't use next(parameters()).
-        model_dtype = _infer_visual_dtype(model)
-        tokens = tokens.to(dtype=model_dtype)
         with torch.no_grad():
             emb = model.encode_text(tokens)
         emb = emb.cpu().numpy().astype(np.float32)
@@ -155,10 +153,10 @@ def encode_single_image_model(image, model, preprocess):
 
 
 def encode_single_text_model(query, model, tokenizer):
+    # Token IDs are integer indices — they MUST stay as Long for the
+    # embedding lookup. open_clip internally casts the output of the
+    # embedding table to the model's compute dtype.
     tokens = tokenizer([query]).to(DEVICE)
-    # Cast to the model's dtype (fp16 on CPU under the 1 GB sandbox).
-    model_dtype = _infer_visual_dtype(model)
-    tokens = tokens.to(dtype=model_dtype)
     with torch.no_grad():
         emb = model.encode_text(tokens)
     return _l2_normalise(emb.cpu().numpy().astype(np.float32))
