@@ -899,7 +899,13 @@ with tab_i2i:
     st.markdown("""
     <div class="info-box">
         🔄 <strong>Image-to-Image reverse search</strong> — upload a query image, encode it with CLIP,
-        then rank the Flickr8k gallery by cosine similarity against precomputed <code>image_embeddings</code>.
+        then rank the Flickr8k gallery by cosine similarity against precomputed <code>image_embeddings</code>.<br><br>
+        ⚠️ <strong>Gallery is Flickr8k (natural images only).</strong> For out-of-distribution
+        images like spectrograms, charts, or diagrams, similarity scores will be low and results
+        approximate — this is the documented <em>"Relative Semantic Proxy effect"</em>.<br>
+        💡 <strong>Tip:</strong> add a short text context below (e.g. <code>bird</code>,
+        <code>spectrogram</code>, <code>chart</code>) to switch to a <strong>text-based</strong>
+        search, which works much better for OOD images.
     </div>""", unsafe_allow_html=True)
 
     col_up_i2i, col_gap_i2i, col_k_i2i = st.columns([4, 0.3, 1.5])
@@ -923,16 +929,53 @@ with tab_i2i:
         with c_prev_i2i:
             st.image(i2i_query, caption="Query image", width="stretch")
 
+        # Optional text refinement — switches the search from image→image to text→image.
+        # This is the right tool for OOD queries (spectrograms, charts, etc.) where the
+        # raw image embedding can't find a good match in the Flickr8k gallery.
+        i2i_text = st.text_input(
+            "Optional text context (switches to text search)",
+            placeholder="e.g. 'bird', 'spectrogram', 'chart'",
+            key="i2i_text",
+            help="Leave empty for pure image search. Add a word/phrase to switch to text search — much better for OOD images.",
+        )
+
         if st.button("Find Similar Images", key="search_i2i"):
-            with st.spinner("Encoding query & searching gallery ..."):
-                i2i_embedding = encode_single_image(i2i_query, model, preprocess)
-                i2i_results = image_to_image_search(
-                    i2i_embedding, img_embeddings, image_paths, top_k=top_k_i2i
-                )
+            i2i_text_clean = (i2i_text or "").strip()
+            if i2i_text_clean:
+                # Text-based search (better for OOD / spectrograms)
+                with st.spinner(f"Encoding text \"{i2i_text_clean}\" & searching gallery ..."):
+                    i2i_embedding = encode_single_text(i2i_text_clean, model)
+                    i2i_results = image_to_image_search(
+                        i2i_embedding, img_embeddings, image_paths, top_k=top_k_i2i
+                    )
+                search_mode = f'text "{i2i_text_clean}"'
+            else:
+                # Pure image-based search (original behaviour)
+                with st.spinner("Encoding query image & searching gallery ..."):
+                    i2i_embedding = encode_single_image(i2i_query, model, preprocess)
+                    i2i_results = image_to_image_search(
+                        i2i_embedding, img_embeddings, image_paths, top_k=top_k_i2i
+                    )
+                search_mode = "image"
+
             st.markdown(
-                f"<div class='results-header'>Top {len(i2i_results)} visually similar images</div>",
+                f"<div class='results-header'>Top {len(i2i_results)} matches via {search_mode} search</div>",
                 unsafe_allow_html=True,
             )
+
+            # Low-score warning: if image-search returned noise-floor scores (<0.55),
+            # the query is likely OOD for the Flickr8k gallery — suggest text refinement.
+            top_score = max((r.score for r in i2i_results), default=0.0)
+            if search_mode == "image" and top_score < 0.55:
+                st.markdown(f"""
+                <div class="info-box" style="background:rgba(255,180,50,0.08);border-color:#ffb432;">
+                    ⚠️ <strong>Low similarity detected</strong> (top score = {top_score:.3f}).
+                    The query image appears <em>out-of-distribution</em> for the Flickr8k gallery
+                    (e.g. spectrogram, chart, diagram). Try the <strong>Image→Caption</strong> tab
+                    to get a text description, or add a text context above (e.g. "bird", "spectrum")
+                    to switch to a text-based search.
+                </div>""", unsafe_allow_html=True)
+
             cols_i2i = st.columns(min(len(i2i_results), 5))
             for col, result in zip(cols_i2i, i2i_results):
                 with col:
